@@ -1,5 +1,7 @@
 # world.execute(me); — 千问娘 MV
 
+> 仓库：**<https://github.com/chail233/qwen3.8-world-execute-me>**（公开）· 中文题名「千问3.8的world.execute(me);」——GitHub 的仓库名不接受中文与括号，所以 slug 用纯英文，中文名写在描述与这里。
+
 一支 **220 秒**的歌词同步 MV，主角是 Qwen 的拟人形象 **Qwen3.8**。整支片子是一次 LLM 推理会话的完整生命周期：加载权重 → 收到第一条 prompt → 流式生成 → 上下文溢出 → 输出退化 → 自己请求世界 `execute()` 掉她 → `finish_reason: "stop"`。
 
 画面全部是 **HTML + SVG + GSAP**，由生成器从每幕的 spec 产出，HyperFrames 逐帧 seek 后渲染成 MP4 — 没有 After Effects，没有时间轴工程文件，成片可以从纯文本重建。
