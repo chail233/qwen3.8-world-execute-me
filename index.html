@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <script src="assets/vendor/gsap.min.js"></script>
+    <script src="assets/vendor/MotionPathPlugin.min.js"></script>
+    <script>if (window.gsap && window.MotionPathPlugin) window.gsap.registerPlugin(window.MotionPathPlugin);</script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #06070C; }
+      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+      .frame { position: absolute; inset: 0; width: 100%; height: 100%; }
+    </style>
+  </head>
+  <body>
+    <div data-hf-id="hf-eq4e" id="root" data-composition-id="main" data-start="0" data-duration="220" data-width="1920" data-height="1080">
+      <div data-hf-id="hf-xbxf" id="el-01-f01-boot" class="frame" data-composition-id="01-f01-boot" data-composition-src="compositions/frames/01-f01-boot.html" data-start="0" data-duration="17.136" data-track-index="1"></div>
+
+      <div data-hf-id="hf-9318" id="el-02-f02-reveal" class="frame" data-composition-id="02-f02-reveal" data-composition-src="compositions/frames/02-f02-reveal.html" data-start="17.136" data-duration="12.539" data-track-index="1"></div>
+
+      <div data-hf-id="hf-uidr" id="el-03-f03-geometry" class="frame" data-composition-id="03-f03-geometry" data-composition-src="compositions/frames/03-f03-geometry.html" data-start="29.675" data-duration="14.327" data-track-index="1"></div>
+
+      <div data-hf-id="hf-s90e" id="el-04-f04-current" class="frame" data-composition-id="04-f04-current" data-composition-src="compositions/frames/04-f04-current.html" data-start="44.002" data-duration="15.255" data-track-index="1"></div>
+
+      <div data-hf-id="hf-gpjv" id="el-05-f05-chorus1" class="frame" data-composition-id="05-f05-chorus1" data-composition-src="compositions/frames/05-f05-chorus1.html" data-start="59.257" data-duration="14.745" data-track-index="1"></div>
+
+      <div data-hf-id="hf-narg" id="el-06-f06-tender" class="frame" data-composition-id="06-f06-tender" data-composition-src="compositions/frames/06-f06-tender.html" data-start="74.002" data-duration="14.443" data-track-index="1"></div>
+
+      <div data-hf-id="hf-xo8l" id="el-07-f07-roleflip" class="frame" data-composition-id="07-f07-roleflip" data-composition-src="compositions/frames/07-f07-roleflip.html" data-start="88.445" data-duration="15.116" data-track-index="1"></div>
+
+      <div data-hf-id="hf-7fpr" id="el-08-f08-eviction" class="frame" data-composition-id="08-f08-eviction" data-composition-src="compositions/frames/08-f08-eviction.html" data-start="103.561" data-duration="14.745" data-track-index="1"></div>
+
+      <div data-hf-id="hf-i79z" id="el-09-f09-collapse" class="frame" data-composition-id="09-f09-collapse" data-composition-src="compositions/frames/09-f09-collapse.html" data-start="118.306" data-duration="17.02" data-track-index="1"></div>
+
+      <div data-hf-id="hf-qp0x" id="el-10-f10-execution" class="frame" data-composition-id="10-f10-execution" data-composition-src="compositions/frames/10-f10-execution.html" data-start="135.326" data-duration="27.005" data-track-index="1"></div>
+
+      <div data-hf-id="hf-n6hv" id="el-11-f11-love" class="frame" data-composition-id="11-f11-love" data-composition-src="compositions/frames/11-f11-love.html" data-start="162.331" data-duration="29.001" data-track-index="1"></div>
+
+      <div data-hf-id="hf-he0g" id="el-12-f12-exit" class="frame" data-composition-id="12-f12-exit" data-composition-src="compositions/frames/12-f12-exit.html" data-start="191.332" data-duration="28.668" data-track-index="1"></div>
+
+      <!-- BGM: assets/audio.mp3, the take the LRC is timed against (129/129 lines land on its own
+           sung onsets, median 0.040s; audiomap's 136 BPM grid still holds, ≤0.017s per 25s window).
+           bgm.mp3 = that file + apad to 220.000s, so the composition length and every act boundary
+           stay exactly as built. Music itself ends at 207.6s -> the exit tail runs silent. -->
+      <audio data-hf-id="hf-i8vk" id="el-bgm" src="assets/bgm.mp3" data-start="0" data-duration="220" data-track-index="11" data-volume="0.9"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>

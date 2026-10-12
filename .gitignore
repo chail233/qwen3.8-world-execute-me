@@ -1,0 +1,32 @@
+# 成片与验证截图（体积大，全部可重建）；只留 frame.md / char-anchors.mjs 引用的四张测量图
+renders/
+snapshots/*
+!snapshots/face-grid.png
+!snapshots/fanfit2.png
+!snapshots/fanfit3.png
+!snapshots/motif-sheet.png
+
+# 音轨：原曲录音不在本仓库分发。放置方法见 README「第 0 步」
+assets/*.mp3
+assets/audio/
+
+# 第三方参考图不替他分发（本地保留；出处见 README 与 frame.md 的 character-system）
+refs/qwen-adult-zipzippipe-pixiv-148186519-p12.jpg
+refs/qwen-chibi-zipzippipe-BV1tE9XBbErS-53s.jpg
+refs/qwen-chibi.png
+
+# agent/CLI 的临时调试页与缓存（点目录，hyperframes lint 也不扫）
+.verify/
+.dev/
+.thumbnails/
+.media/
+.hyperframes/
+
+# 依赖
+node_modules/
+
+# 系统与编辑器
+Thumbs.db
+desktop.ini
+.DS_Store
+*.log

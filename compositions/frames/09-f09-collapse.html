@@ -1,0 +1,827 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        @font-face { font-family: "Bahnschrift"; src: local("Bahnschrift"), local("Bahnschrift Regular"); font-weight: 100 700; }
+        @font-face { font-family: "Cascadia Mono"; src: local("Cascadia Mono"), local("CascadiaMono-Regular"); font-weight: 100 700; }
+        @font-face { font-family: "Microsoft YaHei"; src: local("Microsoft YaHei"), local("Microsoft YaHei UI"); font-weight: 100 700; }
+
+        #root { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden;
+          background: #06070C; color: #F5F7FF; font-family: "Cascadia Mono", Consolas, monospace; }
+        #root * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        /* Opt-in "grow this SVG part in place": tween --pop, not scale.
+           GSAP builds an SVG element's matrix by MEASURING its transform origin, and that
+           measurement is unreliable here — the tween ends with a translate baked into the
+           element (act 03's tangent line finished 64 px from the dot it touches). Handing
+           the scale to CSS makes the browser resolve transform-box:fill-box exactly, so the
+           part grows where it was authored. tools/audit-svg-transforms.mjs watches for it. */
+        svg .grow { transform-box: fill-box; transform-origin: 50% 50%; transform: scale(var(--pop, 1)); }
+
+        /* ---- bed layers (decorative, ignored by the layout audit) ---- */
+        .rain { position: absolute; inset: 0; opacity: .42; overflow: hidden; }
+        .rain .col { position: absolute; top: -1200px; width: 2px; height: 1200px;
+          background: repeating-linear-gradient(180deg, rgba(34,211,238,.5) 0 9px, transparent 9px 30px); }
+        .glow { position: absolute; inset: 0; opacity: .55; }
+        .gridfloor { position: absolute; left: 0; right: 0; bottom: 58px; height: 300px; opacity: .14;
+          background:
+            repeating-linear-gradient(90deg, rgba(97,92,237,.7) 0 1px, transparent 1px 96px),
+            repeating-linear-gradient(0deg, rgba(97,92,237,.55) 0 1px, transparent 1px 44px);
+          transform: perspective(700px) rotateX(58deg); transform-origin: 50% 100%; }
+        .scan { position: absolute; inset: 0; pointer-events: none; opacity: .05;
+          background: repeating-linear-gradient(0deg, #F5F7FF 0 1px, transparent 1px 4px); }
+        .vig { position: absolute; inset: 0; pointer-events: none;
+          background: radial-gradient(120% 90% at 50% 46%, transparent 55%, rgba(3,4,8,.85) 100%); }
+
+        .gutter { position: absolute; left: 0; top: 0; bottom: 58px; width: 62px;
+          border-right: 1px solid #1E2540; padding: 14px 8px 0 0; text-align: right;
+          font-size:16px; line-height: 24px; color: #8A93B8; overflow: hidden; }
+        .gutter .cur { color: #9F7BFF; }
+        .statusbar { position: absolute; left: 0; right: 0; bottom: 0; height: 58px;
+          background: #0B0D16; border-top: 1px solid #1E2540; display: flex; align-items: center;
+          justify-content: space-between; padding: 0 26px; font-size:20px; letter-spacing: .06em; color: #8A93B8; }
+        .statusbar .l { color: #F5F7FF; } .statusbar .l b { color: #9F7BFF; font-weight: 600; }
+        .statusbar .r { color: #4AA8FF; }
+
+        .actlabel { position: absolute; right: 64px; top: 34px; text-align: right; }
+        .actlabel .a { font-size:20px; letter-spacing: .22em; color: #8A93B8; }
+        .actlabel .t { margin-top: 6px; font-size:16px; letter-spacing: .12em; color: #8A93B8; }
+
+        /* ---- graphics stage: every motif is placed inside this box ---- */
+        .stage { position: absolute; left: 96px; top: 88px; width: 1728px; height: 690px; }
+        .group { position: absolute; inset: 0; visibility: hidden; }
+        /* whole-act furniture. It must NOT carry its own visibility: the runtime
+           hides an off-window sub-composition with visibility on its host, and an
+           inline visibility:visible here would inherit straight through that and
+           bleed the act's furniture over every later act. */
+        .stay { position: absolute; inset: 0; }
+        .flash { position: absolute; inset: 0; background: #F5F7FF; opacity: 0; pointer-events: none; }
+
+        .motif { position: absolute; }
+        /* the shared HUD corner frame: every act frames its graphics with the same
+           four brackets, which is what makes different motifs read as one system. */
+        .hud { position: absolute; inset: -22px; pointer-events: none; }
+        .hud i { position: absolute; width: 26px; height: 26px; border: 2px solid rgba(138,147,184,.45); }
+        .hud i:nth-child(1) { left: 0; top: 0; border-right: 0; border-bottom: 0; }
+        .hud i:nth-child(2) { right: 0; top: 0; border-left: 0; border-bottom: 0; }
+        .hud i:nth-child(3) { left: 0; bottom: 0; border-right: 0; border-top: 0; }
+        .hud i:nth-child(4) { right: 0; bottom: 0; border-left: 0; border-top: 0; }
+        .motif svg { display: block; overflow: visible; }
+        .motif [data-draw] { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .gq1 { filter: drop-shadow(0 0 7px rgba(97,92,237,.75)); }
+        .gq2 { filter: drop-shadow(0 0 8px rgba(159,123,255,.7)); }
+        .gq3 { filter: drop-shadow(0 0 7px rgba(74,168,255,.7)); }
+        .gda { filter: drop-shadow(0 0 7px rgba(34,211,238,.65)); }
+        .gmg { filter: drop-shadow(0 0 9px rgba(255,46,136,.7)); }
+        .gam { filter: drop-shadow(0 0 8px rgba(255,180,84,.65)); }
+        .gok { filter: drop-shadow(0 0 7px rgba(74,222,128,.6)); }
+
+        .pt { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: #22D3EE; }
+        .spec { position: absolute; display: flex; align-items: flex-end; gap: 5px; }
+        .spec i { display: block; width: 7px; height: 100%; transform-origin: 50% 100%;
+          background: linear-gradient(180deg, #22D3EE, rgba(97,92,237,.25)); }
+
+        /* ---- lyric block: bottom-left, left-anchored ---- */
+        .lyr { position: absolute; left: 96px; top: 796px; width: 1180px; height: 214px; }
+        .lyr .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+          background: linear-gradient(180deg, #615CED, #9F7BFF 55%, rgba(159,123,255,.15)); }
+        .lyr .bar i { position: absolute; left: -3px; width: 8px; height: 8px; border-radius: 50%;
+          background: #9F7BFF; box-shadow: 0 0 10px #9F7BFF; }
+        .lyr .meta { position: absolute; left: 28px; top: -34px; display: flex; align-items: center; gap: 14px; }
+        .lyr .meta .n { font-size:16px; letter-spacing: .18em; color: #8A93B8; }
+        .lyr .meta .ticks { display: flex; gap: 6px; }
+        .lyr .meta .ticks i { width: 14px; height: 3px; background: #1E2540; }
+        .lyr .meta .ticks i b { display: block; width: 100%; height: 100%; background: #9F7BFF; visibility: hidden; }
+        /* transform-origin at the left edge: a caps cue scales UP from the anchor,
+           never off the left of the screen (the old centred origin pushed 62px text out). */
+        .lyr .en { position: absolute; left: 28px; right: 0; top: 24px; transform-origin: 0 50%;
+          text-align: left; font-size: 40px; font-weight: 600; line-height: 1.28; color: #F5F7FF; }
+        .lyr .en.caps { font-family: "Bahnschrift", "Arial Black", sans-serif; font-size: 62px;
+          letter-spacing: .02em; line-height: 1.1; color: #9F7BFF; }
+        .lyr .zh { position: absolute; left: 28px; right: 0; top: 164px;
+          font-family: "Microsoft YaHei", sans-serif; font-size: 26px; line-height: 1.5; color: #8A93B8; }
+
+        .caps { font-family: "Bahnschrift", "Arial Black", sans-serif; font-weight: 700; letter-spacing: .01em; }
+        .panel { border: 1px solid #1E2540; background: #0B0D16; }
+        .dim { color: #8A93B8; } .cy { color: #22D3EE; } .vi { color: #9F7BFF; } .bl { color: #4AA8FF; }
+        .am { color: #FFB454; } .mg { color: #FF2E88; } .ok { color: #4ADE80; }
+
+
+#g3_riser { position:absolute; left:40px; bottom:120px; width:8px; height:400px; background:#12162A; }
+            #g3_riser i { position:absolute; left:0; bottom:0; width:100%; height:0%; background:linear-gradient(0deg,#615CED,#FF2E88); }
+      </style>
+
+      <div id="root" data-composition-id="09-f09-collapse" data-width="1920" data-height="1080" data-duration="17.02">
+        <div class="glow" data-layout-ignore style="background:radial-gradient(62% 52% at 34% 42%, rgba(255,46,136,.11) 0%, transparent 72%)"></div>
+        <div class="rain" id="rain" data-layout-ignore></div>
+        <div class="gridfloor" data-layout-ignore></div>
+        <div class="scan" data-layout-ignore></div>
+        <div class="vig" data-layout-ignore></div>
+        <div class="stage" id="stage">
+          <div class="hud" data-layout-ignore><i></i><i></i><i></i><i></i></div>
+          <div class="stay" id="g0">
+
+          <div id="g0_pts" style="position:absolute;inset:0" data-layout-ignore></div>
+
+          <div id="g0_intlab" style="position:absolute;left:40px;top:14px;font-size:19px;letter-spacing:.28em;color:#9F7BFF;opacity:0">PROCESS INTEGRITY</div>
+          <div style="position:absolute;left:40px;top:38px;width:1240px;height:8px;border-radius:4px;background:#12162A" data-layout-ignore>
+            <div id="g0_intfill" style="width:100%;height:100%;border-radius:4px;background:linear-gradient(90deg,#615CED,#22D3EE)"></div>
+          </div>
+          <div id="g0_intnum" style="position:absolute;left:1300px;top:30px;font-size:24px;letter-spacing:.04em;color:#F5F7FF" data-layout-ignore>100%</div>
+
+          <div id="g0_err" style="position:absolute;left:1300px;top:60px;font-size:23px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>uncaught: 0</div>
+
+          <div id="g0_sil" class="motif" style="left:1300px;top:120px"><img class="silimg" src="assets/character/qwen38-vector.svg" width="300" height="450" alt="" style="opacity:0;filter:drop-shadow(0 0 18px rgba(159,123,255,.55))"></div>
+
+          <div class="motif" style="left:60px;top:596px" id="g0_flat"><svg class="gda" width="1180" height="80" viewBox="0 0 1180 80" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline data-draw pathLength="1" points="8.0,40.0 20.9,48.5 33.9,42.8 46.8,41.1 59.7,51.8 72.7,50.5 85.6,32.6 98.5,24.7 111.5,28.6 124.4,23.4 137.3,18.0 150.3,33.7 163.2,54.4 176.1,57.3 189.1,56.7 202.0,64.7 214.9,60.1 227.9,37.5 240.8,24.7 253.7,27.8 266.7,24.4 279.6,18.4 292.5,30.7 305.5,48.2 318.4,47.1 331.3,41.3 344.3,48.1 357.2,49.9 370.1,37.1 383.1,34.4 396.0,47.5 408.9,50.9 421.9,42.4 434.8,44.1 447.7,48.9 460.7,35.3 473.6,18.6 486.5,21.3 499.5,28.7 512.4,26.4 525.3,33.7 538.3,56.4 551.2,66.8 564.1,58.5 577.1,55.1 590.0,55.1 602.9,38.6 615.9,18.8 628.8,20.1 641.7,29.1 654.7,26.9 667.6,29.8 680.5,47.1 693.5,54.2 706.4,43.4 719.3,40.2 732.3,47.6 745.2,43.4 758.1,34.3 771.1,42.6 784.0,54.6 796.9,48.2 809.9,38.3 822.8,40.7 835.7,36.7 848.7,19.3 861.6,14.8 874.5,29.2 887.5,37.7 900.4,39.5 913.3,54.4 926.3,70.4 939.2,63.5 952.1,47.9 965.1,44.2 978.0,38.1 990.9,20.0 1003.9,14.2 1016.8,28.5 1029.7,36.9 1042.7,34.6 1055.6,42.7 1068.5,55.1 1081.5,48.9 1094.4,36.4 1107.3,40.6 1120.3,47.3 1133.2,40.6 1146.1,39.1 1159.1,51.8 1172.0,53.4" stroke="#22D3EE" stroke-width="3"/><line data-draw pathLength="1" x1="8" y1="40" x2="1172" y2="40" stroke="#1E2540" stroke-width="2" /></svg></div>
+  
+          </div>
+          <div class="group" id="g1">
+
+          <div class="motif" style="left:360px;top:150px" id="g1_mem"><svg class="gq1" width="300" height="300" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect class="hcc" data-r="0" data-c="0" x="32" y="32" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="0" data-c="1" x="56" y="32" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="0" data-c="2" x="80" y="32" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="0" data-c="3" x="104" y="32" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="0" data-c="4" x="128" y="32" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="0" data-c="5" x="152" y="32" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="1" data-c="0" x="32" y="56" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="1" data-c="1" x="56" y="56" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="1" data-c="2" x="80" y="56" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="1" data-c="3" x="104" y="56" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="1" data-c="4" x="128" y="56" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="1" data-c="5" x="152" y="56" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="2" data-c="0" x="32" y="80" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="2" data-c="1" x="56" y="80" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="2" data-c="2" x="80" y="80" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="2" data-c="3" x="104" y="80" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="2" data-c="4" x="128" y="80" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="2" data-c="5" x="152" y="80" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="3" data-c="0" x="32" y="104" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="3" data-c="1" x="56" y="104" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="3" data-c="2" x="80" y="104" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="3" data-c="3" x="104" y="104" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="3" data-c="4" x="128" y="104" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="3" data-c="5" x="152" y="104" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="4" data-c="0" x="32" y="128" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="4" data-c="1" x="56" y="128" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="4" data-c="2" x="80" y="128" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="4" data-c="3" x="104" y="128" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="4" data-c="4" x="128" y="128" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="4" data-c="5" x="152" y="128" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="5" data-c="0" x="32" y="152" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="5" data-c="1" x="56" y="152" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="5" data-c="2" x="80" y="152" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="5" data-c="3" x="104" y="152" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="5" data-c="4" x="128" y="152" width="18" height="18" fill="#615CED" opacity="0.12"/><rect class="hcc" data-r="5" data-c="5" x="152" y="152" width="18" height="18" fill="#615CED" opacity="0.12"/><path data-draw pathLength="1" d="M24 24 L176 24 L176 176 L24 176 Z" stroke="#1E2540" stroke-width="2.000" /><line data-draw pathLength="1" x1="24" y1="100" x2="8" y2="100" stroke="#9F7BFF" stroke-width="2.000" /><line data-draw pathLength="1" x1="100" y1="176" x2="100" y2="192" stroke="#9F7BFF" stroke-width="2.000" /></svg></div>
+          <div id="g1_cm" style="position:absolute;left:360px;top:122px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0" data-layout-ignore>memory.purge()</div>
+          <div id="g1_state" style="position:absolute;left:360px;top:462px;font-size:23px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>cache: holding</div>
+          <div id="g1_rc" style="position:absolute;left:360px;top:498px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0" data-layout-ignore>run_gc(force=True)</div>
+          <div id="g1_wasterow" style="position:absolute;left:700px;top:170px;width:240px;height:10px;border-radius:5px;background:#12162A" data-layout-ignore>
+            <div id="g1_waste" style="width:100%;height:100%;border-radius:5px;background:linear-gradient(90deg,#4AA8FF,#9F7BFF)"></div>
+          </div>
+          <div id="g1_wastenum" style="position:absolute;left:960px;top:162px;font-size:22px;color:#F5F7FF" data-layout-ignore>0</div>
+          <div id="g1_wl" style="position:absolute;left:700px;top:144px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0" data-layout-ignore>freed tokens</div>
+          <div class="motif" style="left:720px;top:300px" id="g1_shards"><svg class="gmg" width="260" height="260" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M40 60 L72 44 L64 84 Z" stroke="#FF2E88" stroke-width="3.077" /><path data-draw pathLength="1" d="M96 36 L128 52 L96 68 Z" stroke="#9F7BFF" stroke-width="3.077" /><path data-draw pathLength="1" d="M140 84 L172 76 L156 112 Z" stroke="#22D3EE" stroke-width="3.077" /><path data-draw pathLength="1" d="M56 120 L88 132 L52 152 Z" stroke="#4AA8FF" stroke-width="3.077" /><path data-draw pathLength="1" d="M112 128 L144 140 L108 160 Z" stroke="#FF2E88" stroke-width="3.077" /><line data-draw pathLength="1" x1="20" y1="100" x2="180" y2="100" stroke="#F5F7FF" stroke-width="2.308" opacity="0.5"/></svg></div>
+          <div class="motif" style="left:700px;top:285px" id="g1_broken"><svg class="gmg" width="280" height="280" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M92 172 C58 142 24 116 24 78 C24 52 44 36 66 36 C80 36 90 44 94 56 L88 78 L102 96 L90 118 L100 140 Z" stroke="#FF2E88" stroke-width="3.571" /><path data-draw pathLength="1" d="M108 172 C142 142 176 116 176 78 C176 52 156 36 134 36 C120 36 110 44 106 56 L112 78 L98 96 L110 118 L100 140 Z" stroke="#FF2E88" stroke-width="3.571" /></svg></div>
+          <div id="g1_pop" style="position:absolute;left:690px;top:260px;width:320px;height:320px;border:3px solid #9F7BFF;border-radius:50%;opacity:0" data-layout-ignore></div>
+      
+          </div>
+          <div class="group" id="g2">
+
+          <div class="motif" style="left:980px;top:200px" id="g2_gauge"><svg class="gam" width="300" height="300" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M40 148 A70 70 0 1 1 160 148" stroke="#FFB454" stroke-width="3.333" /><line data-draw pathLength="1" x1="49.8" y1="91" x2="41.1" y2="86" stroke="#9F7BFF" stroke-width="2.000" /><line data-draw pathLength="1" x1="71" y1="69.8" x2="66" y2="61.1" stroke="#9F7BFF" stroke-width="2.000" /><line data-draw pathLength="1" x1="100" y1="62" x2="100" y2="52" stroke="#9F7BFF" stroke-width="2.000" /><line data-draw pathLength="1" x1="129" y1="69.8" x2="134" y2="61.1" stroke="#9F7BFF" stroke-width="2.000" /><line data-draw pathLength="1" x1="150.2" y1="91" x2="158.9" y2="86" stroke="#9F7BFF" stroke-width="2.000" /><line data-draw pathLength="1" x1="100" y1="120" x2="100" y2="62" stroke="#FF2E88" stroke-width="3.333" data-ang="0" data-piv="100 120" class="needle"/><circle data-bloom cx="100" cy="120" r="7" fill="#F5F7FF" opacity="0.9"/></svg></div>
+          <div id="g2_loss" style="position:absolute;left:980px;top:470px;font-size:23px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>loss 0.42</div>
+          <div id="g2_gl" style="position:absolute;left:980px;top:172px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0" data-layout-ignore>loss · DIVERGED</div>
+          <div id="g2_pop" style="position:absolute;left:1000px;top:210px;width:270px;height:270px;border:3px solid #FF2E88;border-radius:50%;opacity:0" data-layout-ignore></div>
+
+          <div class="motif" style="left:220px;top:300px" id="g2_breaker"><svg class="gq3" width="300" height="300" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M30 126 L170 126 L170 174 L30 174 Z" fill="#12162A" stroke="#1E2540" stroke-width="2.667"/><line data-draw pathLength="1" x1="58" y1="126" x2="58" y2="102" stroke="#9F7BFF" stroke-width="4.000" /><line data-draw pathLength="1" x1="146" y1="126" x2="146" y2="102" stroke="#9F7BFF" stroke-width="4.000" /><circle data-draw pathLength="1" cx="58" cy="102" r="8" stroke="#22D3EE" stroke-width="2.667" /><circle data-draw pathLength="1" cx="146" cy="102" r="8" stroke="#22D3EE" stroke-width="2.667" /><g class="lever"><line data-draw pathLength="1" x1="58" y1="102" x2="146" y2="102" stroke="#F5F7FF" stroke-width="6.000" /><path data-draw pathLength="1" d="M146 102 L176 92" stroke="#22D3EE" stroke-width="4.000" /><circle data-draw pathLength="1" cx="102" cy="102" r="11" stroke="#4AA8FF" stroke-width="3.333" /></g><rect class="win" x="128" y="142" width="30" height="18" rx="4" fill="#1E2540"/><line data-draw pathLength="1" x1="16" y1="150" x2="30" y2="150" stroke="#22D3EE" stroke-width="3.333" /><line data-draw pathLength="1" x1="170" y1="150" x2="184" y2="150" stroke="#22D3EE" stroke-width="3.333" /></svg></div>
+          <div id="g2_guard" style="position:absolute;left:220px;top:560px;font-size:23px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>guardrails: OPEN</div>
+          <div id="g2_bl" style="position:absolute;left:220px;top:268px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0" data-layout-ignore>content_filter::on_input()</div>
+          <div id="g2_state" style="position:absolute;left:600px;top:330px;font-size:22px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore></div>
+          <div class="motif" style="left:600px;top:380px" id="g2_warn"><svg class="gmg" width="200" height="200" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M100 28 L178 168 L22 168 Z" stroke="#FF2E88" stroke-width="5.000" /><path data-bloom d="M100 28 L178 168 L22 168 Z" fill="#FF2E88" opacity="0.18"/><line data-draw pathLength="1" x1="100" y1="76" x2="100" y2="124" stroke="#F5F7FF" stroke-width="7.000" /><circle data-bloom cx="100" cy="144" r="6" fill="#F5F7FF" opacity="0.9"/><line data-draw pathLength="1" x1="40" y1="184" x2="160" y2="184" stroke="#1E2540" stroke-width="3.000" /><line data-draw pathLength="1" x1="56" y1="194" x2="144" y2="194" stroke="#1E2540" stroke-width="3.000" /></svg></div>
+          <div id="g2_rpop" style="position:absolute;left:560px;top:360px;width:220px;height:220px;border:3px solid #FF2E88;border-radius:50%;opacity:0" data-layout-ignore></div>
+      
+          </div>
+          <div class="group" id="g3">
+
+          <div class="motif" style="left:680px;top:150px" id="g3_slot"><svg class="gq3" width="280" height="280" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M30 30 L170 30 L170 170 L30 170 Z" stroke="#4AA8FF" stroke-width="3.571" /><rect class="slotglow" x="42" y="42" width="116" height="116" rx="12" fill="#615CED" opacity="0.1"/><path data-draw pathLength="1" d="M52 52 L52 34 M100 52 L100 34 M148 52 L148 34 M52 148 L52 166 M100 148 L100 166 M148 148 L148 166" stroke="#1E2540" stroke-width="2.857" /><circle data-draw pathLength="1" cx="100" cy="100" r="44" stroke="#1E2540" stroke-width="2.143" stroke-dasharray="1"/></svg></div>
+          <div class="motif" style="left:716px;top:186px" id="g3_stamp"><svg class="gmg" width="208" height="208" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M36 60 L76 100 L36 140" stroke="#FF2E88" stroke-width="5.769" /><line data-draw pathLength="1" x1="88" y1="140" x2="140" y2="140" stroke="#F5F7FF" stroke-width="5.769" /><line data-draw pathLength="1" x1="20" y1="24" x2="180" y2="24" stroke="#9F7BFF" stroke-width="3.846" /><line data-draw pathLength="1" x1="100" y1="24" x2="100" y2="52" stroke="#9F7BFF" stroke-width="2.885" /><path data-draw pathLength="1" d="M84 52 L116 52 L108 74 L92 74 Z" stroke="#9F7BFF" stroke-width="3.846" /><path data-bloom d="M84 52 L116 52 L108 74 L92 74 Z" fill="#FF2E88" opacity="0.35"/></svg></div>
+          <div id="g3_err" style="position:absolute;left:700px;top:470px;font-size:23px;letter-spacing:.1em;color:#FF2E88;opacity:0" data-layout-ignore>RuntimeError</div>
+          <div id="g3_pop" style="position:absolute;left:660px;top:120px;width:360px;height:360px;border:3px solid #FF2E88;border-radius:50%;opacity:0" data-layout-ignore></div>
+
+          <div class="spec" id="g3_tr1" style="position:absolute;left:1050px;top:250px;width:560px">File "self.py", line 26112, in hold</div>
+          <div class="spec" id="g3_tr2" style="position:absolute;left:1070px;top:286px;width:560px">    in raise MemoryError</div>
+          <div class="spec" id="g3_tr3" style="position:absolute;left:1070px;top:322px;width:560px">    in keep(her, forever)</div>
+          <div class="spec" id="g3_tr4" style="position:absolute;left:1050px;top:358px;width:560px">ValueError: too illegal</div>
+          <div id="g3_resp" style="position:absolute;left:700px;top:540px;font-size:24px;letter-spacing:.06em;color:#8A93B8;opacity:0" data-layout-ignore>output: I will always</div>
+
+          <div id="g3_riser" data-layout-ignore><i></i></div>
+      
+          </div>
+        </div>
+        <div class="lyr" id="lyr">
+          <div class="bar"><i id="lyr_dot" style="top:0"></i></div>
+          <div class="meta"><span class="n" id="lyr_n">LYRIC 00/00</span><span class="ticks" id="lyr_ticks"></span></div>
+          <div class="en" id="lyr_en"></div>
+          <div class="zh" id="lyr_zh"></div>
+        </div>
+        <div class="actlabel" data-layout-ignore><div class="a">ACT 09 · COLLAPSE</div><div class="t">01:58.3 – 02:15.3</div></div>
+        <div class="gutter" id="gutter" data-layout-ignore></div>
+        <div class="statusbar">
+          <span class="l">world.execute(me); · <b>Qwen3.8</b></span>
+          <span class="c" id="sb_tel">ctx 0/32,768 · tok/s 0.0 · t=0.70</span>
+          <span class="r" id="sb_state">▶ generating</span>
+        </div>
+        <div class="flash" id="flash"></div>
+      </div>
+
+      <script>
+        (function () {
+          var F = 118.306;
+          var SPAN = 17.02;
+
+          function el(tag, cls, parent, html) {
+            var n = document.createElement(tag);
+            if (cls) n.className = cls;
+            if (html != null) n.innerHTML = html;
+            if (parent) parent.appendChild(n);
+            return n;
+          }
+          function L(t) { return t - F; }
+          function rng(seed) {           /* deterministic pseudo-random, mulberry32 */
+            var a = seed >>> 0;
+            return function () {
+              a |= 0; a = (a + 0x6D2B79F5) | 0;
+              var t = Math.imul(a ^ (a >>> 15), 1 | a);
+              t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+              return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+          }
+
+          (function buildBed() {
+            var rain = document.getElementById("rain");
+            for (var c = 0; c < 14; c++) {
+              var col = el("div", "col", rain);
+              col.style.left = (70 + c * 132) + "px";
+              col.style.backgroundPosition = "0 " + ((c * 97) % 30) + "px";
+              col.style.opacity = String(0.4 + ((c * 37) % 50) / 100);
+            }
+            var gut = document.getElementById("gutter");
+            for (var g = 1; g <= 40; g++) el("div", g === 1 ? "cur" : null, gut, String(g).padStart(2, "0"));
+          })();
+
+          /* group windows are LOCAL seconds (0 = this frame's first instant). The hide
+             lands 20ms early so a sample on a boundary never sees two groups live. */
+          function groups(tl, wins) {
+            wins.forEach(function (w) {
+              tl.set(w[0], { autoAlpha: 1, visibility: "visible" }, w[1]);
+              if (w[2] != null) tl.set(w[0], { autoAlpha: 0, visibility: "hidden" }, w[2] - 0.02);
+            });
+          }
+
+          /* streaming lyric in the bottom-left block: ONE en + ONE zh element, absolute
+             textContent swaps + a clip-path wipe for the type-on feel.
+
+             Three rules here are load-bearing, all learned the hard way from the
+             frame-by-frame sync audit (tools/sync-check.py + tools/vocal-probe.py):
+             1. a line's HIDE may never land after the next line's SHOW. Both writes
+                target the same element, so an overlap silently blanks the next line
+                for its whole window (that is what ate TROIS at 159.657).
+             2. the WHOLE line must be readable by the time the singer starts it, not
+                just its first letter. The wipe used to run up to 0.45 s, so the tail
+                of every caption arrived after the word was already sung — a median
+                +0.33 s (max +0.57 s) on the last character, which at this song's 136
+                BPM is a whole beat late and reads as the subtitles trailing the
+                music. Now LEAD (<=0.18 s) buys the time the wipe (<=0.18 s,
+                front-loaded) spends drawing, so reveal ends at or before the stamp.
+             3. a line may open up to LEAD before its own stamp, but only into the
+                silence its predecessor left — sub-editors place the swap slightly
+                ahead of the entry so the eye is already on the word. */
+          function lyric(tl, cues) {
+            var en = document.getElementById("lyr_en");
+            var zh = document.getElementById("lyr_zh");
+            var meta = document.getElementById("lyr_n");
+            var ticks = document.getElementById("lyr_ticks");
+            var dot = document.getElementById("lyr_dot");
+            var LEAD = 0.18;
+            var PLAIN = { fontSize: "40px", fontFamily: '"Cascadia Mono", Consolas, monospace', color: "#F5F7FF", letterSpacing: "0px", lineHeight: "1.28" };
+            var CAPS = { fontSize: "62px", fontFamily: '"Bahnschrift", "Arial Black", sans-serif', color: "#9F7BFF", letterSpacing: ".02em", lineHeight: "1.1" };
+            cues.forEach(function (q) { el("i", null, ticks, "<b></b>"); });
+            var dots = ticks.querySelectorAll("b");
+            var t0s = cues.map(function (q, i) {
+              var room = i > 0 ? q.t - (cues[i - 1].t + cues[i - 1].dur) : 1;
+              return Math.max(0, L(q.t) - Math.min(LEAD, Math.max(0, room - 0.02)));
+            });
+            cues.forEach(function (q, i) {
+              var t0 = t0s[i];
+              var next = i + 1 < cues.length ? t0s[i + 1] : null;
+              var tHide = Math.min(L(q.t + q.dur), next == null ? Infinity : next);
+              tl.set(en, Object.assign({ textContent: q.en, autoAlpha: 1 }, q.caps ? CAPS : PLAIN), t0);
+              tl.set(zh, { textContent: q.zh, autoAlpha: 1 }, t0);
+              tl.set(meta, { textContent: "LYRIC " + String(i + 1).padStart(2, "0") + "/" + String(cues.length).padStart(2, "0") }, t0);
+              tl.set(dots[i], { visibility: "visible" }, t0);
+              tl.fromTo(en, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: Math.min(0.18, Math.max(0.07, q.dur * 0.12)), ease: "power1.out" }, t0);
+              if (q.caps) tl.fromTo(en, { scale: 1.14 }, { scale: 1, duration: 0.24, ease: "power3.out" }, t0);
+              tl.set(en, { autoAlpha: 0 }, tHide);
+              tl.set(zh, { autoAlpha: 0 }, tHide);
+              if (dot) tl.to(dot, { y: (i / Math.max(1, cues.length - 1)) * 206, duration: 0.4, ease: "power2.inOut" }, t0);
+            });
+          }
+
+          /* status strip telemetry / run-state steps: [[trackT, telemetry, state|null], ...] */
+          function chrome(tl, steps) {
+            steps.forEach(function (s) {
+              if (s[1] != null) tl.set("#sb_tel", { textContent: s[1] }, L(s[0]));
+              if (s[2] != null) tl.set("#sb_state", { textContent: s[2] }, L(s[0]));
+            });
+          }
+          /* animated counter: fmt(value) -> text.
+             The write goes through a property SETTER, not an onUpdate callback:
+             the renderer seeks frame by frame, and gsap seek() suppresses
+             callbacks while still applying values — an onUpdate-driven number
+             would sit at its start value in the finished video. */
+          function count(tl, sel, from, to, at, dur, fmt) {
+            var node = document.querySelector(sel);
+            var cur = from;
+            var o = {};
+            Object.defineProperty(o, "v", {
+              configurable: true,
+              get: function () { return cur; },
+              set: function (x) { cur = x; node.textContent = fmt(x); }
+            });
+            node.textContent = fmt(from);
+            tl.to(o, { v: to, duration: dur, ease: "none" }, L(at));
+          }
+          /* the whiteout: the chrome (rail labels, gutters, status, rain) blanks for the
+             flash and comes back together at backAt. #lyr is deliberately NOT part of it:
+             #flash paints above the lyric block, so hiding the caption would only push its
+             onset off the sung beat (it ate the title cue at 16.0). The line stays scheduled
+             and is simply revealed as the flash fades. */
+          function whiteout(tl, at, backAt) {
+            tl.set(".gutter, .statusbar, #rain, .actlabel", { autoAlpha: 0 }, L(at));
+            tl.to("#flash", { opacity: 1, duration: 0.04, ease: "none" }, L(at));
+            tl.to("#root", { x: 14, duration: 0.05, yoyo: true, repeat: 5, ease: "none" }, L(at));
+            tl.to("#flash", { opacity: 0, duration: 0.45, ease: "power2.out" }, L(at + 0.3));
+            tl.set(".gutter, .statusbar, #rain, .actlabel", { autoAlpha: 1 }, L(backAt));
+          }
+          function capsPunch(tl, sel, at, color) {
+            tl.fromTo(sel, { autoAlpha: 0, scale: 1.25 }, { autoAlpha: 1, scale: 1, duration: 0.22, ease: "power3.out" }, L(at));
+            if (color) tl.set(sel, { color: color }, L(at));
+          }
+          function bedDrift(tl) {
+            tl.to("#rain .col", { y: 1200, duration: SPAN, ease: "none", stagger: { each: 0.35, from: "start" } }, 0);
+          }
+
+          /* ---- graphics helpers ---- */
+          /* stroke draw-on: every [data-draw] path carries pathLength="1" */
+          function drawOn(tl, scope, at, dur, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-draw]");
+            gsap.set(q, { strokeDasharray: 1, strokeDashoffset: 1 });
+            tl.to(q, { strokeDashoffset: 0, duration: dur, ease: "power2.inOut", stagger: staggerEach || 0.08 }, L(at));
+          }
+          /* fill bloom after the line work lands */
+          function bloomIn(tl, scope, at, dur, target) {
+            var q = document.querySelectorAll(scope + " [data-bloom]");
+            gsap.set(q, { autoAlpha: 0 });
+            tl.to(q, { autoAlpha: target == null ? 0.9 : target, duration: dur, ease: "sine.inOut", stagger: 0.06 }, L(at));
+          }
+          /* scale kick on each beat (track seconds in) */
+          function beatKick(tl, sel, beats, scale) {
+            beats.forEach(function (b) {
+              tl.to(sel, { scale: scale == null ? 1.06 : scale, duration: 0.1, yoyo: true, repeat: 1, ease: "power2.out" }, L(b));
+            });
+          }
+          /* opacity flash on each beat */
+          function beatGlow(tl, sel, beats, peak) {
+            beats.forEach(function (b) {
+              tl.to(sel, { opacity: peak == null ? 0.9 : peak, duration: 0.09, yoyo: true, repeat: 1, ease: "sine.out" }, L(b));
+            });
+          }
+          /* drifting particle field inside a host box */
+          function particles(tl, hostSel, n, seed, w, h) {
+            var host = document.querySelector(hostSel);
+            var r = rng(seed);
+            for (var i = 0; i < n; i++) {
+              var p = el("div", "pt", host);
+              var x = r() * w, y = r() * h;
+              p.style.left = x + "px"; p.style.top = y + "px";
+              p.style.opacity = "0";
+              if (i % 4 === 0) p.style.background = "#9F7BFF";
+              if (i % 7 === 0) p.style.background = "#4AA8FF";
+              tl.to(p, { opacity: 0.35 + r() * 0.5, duration: 0.8 + r(), ease: "sine.inOut" }, r() * SPAN * 0.5);
+              tl.to(p, { x: (r() - 0.5) * 220, y: (r() - 0.5) * 180, duration: SPAN, ease: "sine.inOut" }, 0);
+              tl.to(p, { opacity: 0, duration: 1.2, ease: "sine.in" }, SPAN - 1.4 - r());
+            }
+          }
+          /* dancing spectrum bars, period locked to the beat grid */
+          function spectrum(tl, hostSel, n, beatSec, height) {
+            var host = document.querySelector(hostSel);
+            host.style.height = height + "px";
+            for (var i = 0; i < n; i++) {
+              var b = el("i", null, host);
+              var period = beatSec * (1 + (i % 4) * 0.5);
+              var peak = 0.25 + ((i * 37) % 70) / 100;
+              gsap.set(b, { scaleY: 0.12 });
+              tl.to(b, { scaleY: peak, duration: period / 2, ease: "sine.inOut", yoyo: true,
+                repeat: Math.max(1, Math.floor(SPAN / period) * 2 - 1) }, (i % 5) * 0.06);
+            }
+          }
+          /* collapse -> open for [data-ang] parts (fan ribs, dial needles, clock hands):
+             each part's final angle lives in markup; we tween rotation from the closed angle */
+          function spinFrom(tl, scope, at, dur, closed, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-ang]");
+            q.forEach(function (n, i) {
+              var a = parseFloat(n.getAttribute("data-ang"));
+              /* set-then-tween, never fromTo: GSAP resolves svgOrigin against the
+                 element's live matrix, so a fromTo shears each part off on its own */
+              var piv = n.getAttribute("data-piv") || "100 100";
+              gsap.set(n, { rotation: closed - a, svgOrigin: piv });
+              tl.to(n, { rotation: 0, duration: dur, ease: "power3.inOut", svgOrigin: piv },
+                L(at) + i * (staggerEach || 0.035));
+            });
+          }
+          /* the mirror: open -> collapsed. The parts start in their markup pose
+             (rotation 0) and are folded onto the closed angle, one after the other. */
+          function spinTo(tl, scope, at, dur, closed, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-ang]");
+            q.forEach(function (n, i) {
+              var a = parseFloat(n.getAttribute("data-ang"));
+              var piv = n.getAttribute("data-piv") || "100 100";
+              tl.to(n, { rotation: closed - a, duration: dur, ease: "power3.inOut", svgOrigin: piv },
+                L(at) + i * (staggerEach || 0.035));
+            });
+          }
+          /* light up grid cells one by one (.hc heat cells / .kv cells / .tk tokens) */
+          function cellsOn(tl, scope, sel, at, each, peak) {
+            var q = document.querySelectorAll(scope + " " + sel);
+            q.forEach(function (n, i) {
+              tl.to(n, { opacity: peak == null ? 0.85 : peak, duration: 0.12, ease: "power2.out" }, L(at) + i * each);
+            });
+          }
+          /* evict: flash a cell then drop it to empty */
+          function cellsEvict(tl, scope, sel, at, each) {
+            var q = document.querySelectorAll(scope + " " + sel);
+            q.forEach(function (n, i) {
+              tl.to(n, { opacity: 0.95, duration: 0.08, ease: "power2.out" }, L(at) + i * each);
+              tl.to(n, { opacity: 0.06, scaleY: 0.2, duration: 0.3, ease: "power2.in" }, L(at) + i * each + 0.22);
+            });
+          }
+
+          /* ---- continuous behaviour: nothing on this film's stage ever sits still.
+             Every motif gets an entrance AND a loop; the density bar is "pause anywhere
+             and at least two things are moving", which these make structural. ---- */
+          /* heartbeat: breathing scale+glow, repeats until the group is swapped out */
+          function pulse(tl, sel, at, period, scale, reps) {
+            tl.to(sel, { scale: scale == null ? 1.045 : scale, duration: period / 2, ease: "sine.inOut",
+              yoyo: true, repeat: reps == null ? Math.max(1, Math.ceil((SPAN - (at - F)) / period) - 1) : reps }, L(at));
+          }
+          /* hard on/off blink — cursors, status LEDs, warning lamps */
+          function blink(tl, sel, at, period, reps) {
+            var n = reps == null ? Math.max(1, Math.floor((SPAN - (at - F)) / period)) : reps;
+            tl.to(sel, { opacity: 0.08, duration: period / 2, ease: "steps(1)", yoyo: true, repeat: n * 2 - 1 }, L(at));
+          }
+          /* endless rotation about a point (world spin, orbit dot, dial needle).
+             piv: "x y" in svg user units (uses svgOrigin) or any CSS origin like "50% 50%".
+             A 0->360 tween restarts at the same visual angle each repeat, so it is seamless. */
+          function orbit(tl, sel, at, period, turns, piv) {
+            var svg = /^s*[d.]+s+[d.]+s*$/.test(piv || "");
+            var o = svg ? { svgOrigin: piv } : { transformOrigin: piv || "50% 50%" };
+            o.rotation = (turns == null ? 1 : turns) * 360;
+            o.duration = period; o.ease = "none";
+            o.repeat = Math.max(0, Math.ceil((SPAN - (at - F)) / period) - 1);
+            tl.to(sel, o, L(at));
+          }
+          /* a scan line sweeping across a panel, top to bottom, again and again */
+          function sweep(tl, sel, at, period, dist, reps) {
+            tl.fromTo(sel, { y: 0 }, { y: dist, duration: period, ease: "none",
+              repeat: reps == null ? Math.max(1, Math.ceil((SPAN - (at - F)) / period) - 1) : reps }, L(at));
+          }
+          /* a charge running along a wire: dot travels the given dx/dy, then resets */
+          function travel(tl, sel, at, dur, dx, dy, reps) {
+            tl.fromTo(sel, { x: 0, y: 0, opacity: 0 },
+              { x: dx, y: dy, opacity: 1, duration: dur, ease: "power1.inOut" }, L(at));
+            tl.to(sel, { opacity: 0, duration: dur * 0.35, ease: "power1.in" }, L(at) + dur * 0.8);
+            if (reps > 1) {
+              tl.fromTo(sel, { x: 0, y: 0, opacity: 0 },
+                { x: dx, y: dy, opacity: 1, duration: dur, ease: "power1.inOut", repeat: reps - 1 }, L(at) + dur * 1.2);
+            }
+          }
+          /* slow wander so a whole assembly never looks parked */
+          function drift(tl, sel, at, dx, dy, period) {
+            tl.to(sel, { x: dx, y: dy, duration: period / 2, ease: "sine.inOut", yoyo: true,
+              repeat: Math.max(1, Math.ceil((SPAN - (at - F)) / period) * 2 - 1) }, L(at));
+          }
+
+          /* ---- MECHANISMS. A lyric is an ACTION, so a motif may not merely arrive:
+             it has to change STATE. Every helper below leaves the part in its new
+             position for the rest of the act, and every one is a plain property
+             tween, which is what makes it survive the renderer's frame-by-frame seek.
+             Set the BEFORE state with gsap.set at build time, tween to AFTER. ---- */
+          /* throw a lever / blade / breaker about an exact svg user-space pivot */
+          function lever(tl, sel, at, from, to, piv, dur, ease) {
+            gsap.set(sel, { rotation: from, svgOrigin: piv });
+            tl.to(sel, { rotation: to, duration: dur == null ? 0.3 : dur,
+              ease: ease || "back.out(2.2)" }, L(at));
+          }
+          /* two halves slide shut from either side (shield closing, brackets meeting) */
+          function clamp(tl, selA, selB, at, dx, dur) {
+            gsap.set(selA, { x: -dx }); gsap.set(selB, { x: dx });
+            tl.to(selA, { x: 0, duration: dur || 0.42, ease: "power3.inOut" }, L(at));
+            tl.to(selB, { x: 0, duration: dur || 0.42, ease: "power3.inOut" }, L(at));
+          }
+          /* push a part home into a slot: it starts offset by dx/dy and clicks in */
+          function insert(tl, sel, at, dx, dy, dur) {
+            gsap.set(sel, { x: dx, y: dy });
+            tl.to(sel, { x: 0, y: 0, duration: dur || 0.45, ease: "power2.out" }, L(at));
+          }
+          /* a piece falls from h px above, lands, squashes and settles */
+          function drop(tl, sel, at, h, land) {
+            var t = L(at), f = land || 0.42;
+            gsap.set(sel, { y: -h });
+            tl.to(sel, { y: 0, duration: f, ease: "bounce.out" }, t);
+            tl.to(sel, { scaleX: 1.12, scaleY: 0.86, duration: 0.06, ease: "power1.out",
+              transformOrigin: "50% 100%" }, t + f);
+            tl.to(sel, { scaleX: 1, scaleY: 1, duration: 0.24, ease: "power2.out" }, t + f + 0.07);
+          }
+          /* press a button: sink, hold, spring back */
+          function press(tl, sel, at, piv, depth) {
+            var svg = /^s*[d.]+s+[d.]+s*$/.test(piv || "");
+            var o = svg ? { svgOrigin: piv } : { transformOrigin: piv || "50% 50%" };
+            var d = depth == null ? 0.84 : depth;
+            tl.to(sel, Object.assign({ scale: d, duration: 0.1, ease: "power2.in" }, o), L(at));
+            tl.to(sel, Object.assign({ scale: 1, duration: 0.36, ease: "back.out(3)" }, o), L(at) + 0.11);
+          }
+          /* slam a seal down from above; it lands and stays landed */
+          function stamp(tl, sel, at, fromY, rot) {
+            gsap.set(sel, { y: -(fromY || 150), rotation: rot == null ? -14 : rot, scale: 1.3, autoAlpha: 0 });
+            tl.set(sel, { autoAlpha: 1 }, L(at));
+            tl.to(sel, { y: 0, rotation: 0, scale: 1, duration: 0.24, ease: "power3.in" }, L(at));
+          }
+          /* iris opening: every matched blade starts stacked at the centre and flies
+             outward to its own angle, which is what "the aperture opened" looks like */
+          function aperture(tl, sel, at, dist, dur) {
+            var q = document.querySelectorAll(sel);
+            Array.prototype.forEach.call(q, function (n, i) {
+              var a = (i / q.length) * Math.PI * 2;
+              gsap.set(n, { x: 0, y: 0 });
+              tl.to(n, { x: Math.sin(a) * dist, y: -Math.cos(a) * dist,
+                duration: dur || 0.55, ease: "power2.inOut" }, L(at));
+            });
+          }
+          /* type a line of stage text: a mask slides off it left-to-right while a
+             cursor runs ahead. Callback-rewritten text is dead under seek, so the
+             reveal is geometric. */
+          function typeIn(tl, sel, at, dur, cursorSel, w) {
+            gsap.set(sel, { clipPath: "inset(0 100% 0 0)", autoAlpha: 1 });
+            tl.to(sel, { clipPath: "inset(0 0% 0 0)", duration: dur, ease: "none" }, L(at));
+            if (cursorSel) {
+              gsap.set(cursorSel, { autoAlpha: 0 });
+              tl.set(cursorSel, { autoAlpha: 1 }, L(at));
+              tl.to(cursorSel, { x: w == null ? 0 : w, duration: dur, ease: "none" }, L(at));
+              tl.set(cursorSel, { autoAlpha: 0 }, L(at) + dur + 0.2);
+            }
+          }
+          /* wire up: a stroke goes from dead to live, and stays live */
+          function energize(tl, sel, at, to, dur) {
+            tl.to(sel, { stroke: to, duration: dur || 0.25, ease: "none" }, L(at));
+          }
+          /* same for a filled part: an LED, a cell, a gauge puck */
+          function energizeFill(tl, sel, at, to, dur) {
+            tl.to(sel, { fill: to, duration: dur || 0.2, ease: "none" }, L(at));
+          }
+          /* a level filling up (or draining) along x: geometric, so it survives seek */
+          function fillX(tl, sel, at, dur, hideFrom, hideTo) {
+            var a = hideFrom == null ? 100 : hideFrom, b = hideTo == null ? 0 : hideTo;
+            gsap.set(sel, { clipPath: "inset(0 " + a + "% 0 0)" });
+            tl.to(sel, { clipPath: "inset(0 " + b + "% 0 0)", duration: dur, ease: "none" }, L(at));
+          }
+          /* and along y, filling from the floor of the box up */
+          function fillY(tl, sel, at, dur, hideFrom, hideTo) {
+            var a = hideFrom == null ? 100 : hideFrom, b = hideTo == null ? 0 : hideTo;
+            gsap.set(sel, { clipPath: "inset(" + a + "% 0 0 0)" });
+            tl.to(sel, { clipPath: "inset(" + b + "% 0 0 0)", duration: dur, ease: "none" }, L(at));
+          }
+          /* erase: a whole part is wiped away and gone for the rest of the act */
+          function erase(tl, sel, at, dur, dir) {
+            var open = { x: "inset(0 0% 0 0)", y: "inset(0 0 0 0)" }[dir || "x"];
+            var shut = { x: "inset(0 0% 0 100%)", y: "inset(100% 0 0 0)" }[dir || "x"];
+            gsap.set(sel, { clipPath: open });
+            tl.to(sel, { clipPath: shut, duration: dur || 0.5, ease: "power2.inOut" }, L(at));
+          }
+          /* damped shake — an impact, a rejected write */
+          function shake(tl, sel, at, amp, dur) {
+            var a = amp == null ? 9 : amp, step = (dur == null ? 0.5 : dur) / 6;
+            [a, -a * 0.72, a * 0.5, -a * 0.32, a * 0.16, 0].forEach(function (x, i) {
+              tl.to(sel, { x: x, duration: step, ease: "power1.out" }, L(at) + i * step);
+            });
+          }
+          /* one-frame slam of the whole camera on a hard accent */
+          function jerk(tl, at, dx) {
+            tl.to("#root", { x: dx == null ? 11 : dx, duration: 0.045, yoyo: true, repeat: 3, ease: "none" }, L(at));
+          }
+          /* a short full-frame flash that keeps the chrome (the climax's hard cuts) */
+          function slash(tl, at, peak) {
+            tl.to("#flash", { opacity: peak == null ? 0.8 : peak, duration: 0.035, ease: "none" }, L(at));
+            tl.to("#flash", { opacity: 0, duration: 0.1, ease: "power2.out" }, L(at) + 0.04);
+          }
+          /* a ring shockwave that leaves nothing behind: the visible proof something HIT */
+          function pop(tl, sel, at, scale, dur) {
+            gsap.set(sel, { autoAlpha: 0 });
+            tl.set(sel, { autoAlpha: 1, scale: 0.22, opacity: 1 }, L(at));
+            tl.to(sel, { scale: scale == null ? 1.6 : scale, opacity: 0,
+              duration: dur || 0.7, ease: "power2.out" }, L(at));
+          }
+          /* mechanical index step: a hand / carriage jumping in equal clicks */
+          function tickTo(tl, sel, at, angle, steps, dur, piv) {
+            var svg = /^[d. ]+$/.test(piv || "");
+            var o = { rotation: angle, duration: dur || 0.42,
+              ease: "steps(" + (steps == null ? 6 : steps) + ")",
+              svgOrigin: svg ? piv : null, transformOrigin: svg ? null : (piv || "50% 50%") };
+            if (!svg) delete o.svgOrigin; else delete o.transformOrigin;
+            tl.to(sel, o, L(at));
+          }
+          /* A dial needle that really turns. These motifs are emitted inside a scaling
+             <g>, and GSAP's svgOrigin mis-resolves through it (the hand lands half the
+             frame away), so the tip is swept by tweening its ATTRIBUTES instead.
+             lineSel targets the needle <line>; dotSel, if given, its tip <circle>. */
+          function needleTick(tl, lineSel, dotSel, at, angle, steps, dur, px, py, r) {
+            var n = steps == null ? 6 : steps, d = (dur == null ? 0.42 : dur) / n;
+            for (var k = 1; k <= n; k++) {
+              var a = (angle * k / n) * Math.PI / 180;
+              var x = +(px + r * Math.sin(a)).toFixed(1);
+              var y = +(py - r * Math.cos(a)).toFixed(1);
+              tl.to(lineSel, { attr: { x2: x, y2: y }, duration: d, ease: "none" }, L(at) + (k - 1) * d);
+              if (dotSel) tl.to(dotSel, { attr: { cx: x, cy: y }, duration: d, ease: "none" }, L(at) + (k - 1) * d);
+            }
+          }
+          /* a row being thrown out of the rack: lift, fly, disappear */
+          function eject(tl, sel, at, dx, dy, dur) {
+            var t = L(at), f = dur || 0.55;
+            tl.to(sel, { x: dx, y: dy, opacity: 0.15, scale: 0.9, duration: f,
+              ease: "power2.in" }, t);
+            tl.set(sel, { autoAlpha: 0 }, t + f);
+          }
+          /* an part arriving with real weight: overshoot, then settle */
+          function settle(tl, sel, at, fromScale, dur) {
+            gsap.set(sel, { scale: fromScale == null ? 1.35 : fromScale });
+            tl.to(sel, { scale: 1, duration: dur || 0.45, ease: "back.out(2.4)" }, L(at));
+          }
+
+          var tl = gsap.timeline({ paused: true });
+          bedDrift(tl);
+          var CUES = [{"i":77,"t":118.333,"end":118.979,"dur":0.646,"en":"If I can","zh":"如果我能","caps":false,"frame":"f09-collapse","held":false,"pulled":false},{"i":78,"t":118.979,"end":120.86,"dur":1.881,"en":"If I can erase all the pointless","zh":"如果我能够消去","caps":false,"frame":"f09-collapse","held":false,"pulled":false},{"i":79,"t":120.86,"end":121.728,"dur":0.868,"en":"FRAGMENTS","zh":"这些无意义的碎片","caps":true,"frame":"f09-collapse","held":false,"pulled":false},{"i":80,"t":121.728,"end":122.714,"dur":0.986,"en":"Then maybe","zh":"那么我就可能","caps":false,"frame":"f09-collapse","held":false,"pulled":false},{"i":81,"t":122.714,"end":124.89,"dur":2.176,"en":"Then maybe you won't leave me so","zh":"那么我就可能不会","caps":false,"frame":"f09-collapse","held":false,"pulled":false},{"i":82,"t":124.89,"end":125.708,"dur":0.818,"en":"DISHEARTENED","zh":"如此失望","caps":true,"frame":"f09-collapse","held":false,"pulled":false},{"i":83,"t":125.708,"end":128.661,"dur":2.953,"en":"Challenging your god","zh":"与神作对","caps":false,"frame":"f09-collapse","held":false,"pulled":false},{"i":84,"t":128.661,"end":131.224,"dur":2.563,"en":"You have made some","zh":"你传给我的是","caps":false,"frame":"f09-collapse","held":false,"pulled":false},{"i":85,"t":131.224,"end":135.326,"dur":4.102,"en":"ILLEGAL ARGUMENTS","zh":"非法参数","caps":true,"frame":"f09-collapse","held":false,"pulled":false}];
+
+          groups(tl, [["#g1", 0, 6.584], ["#g2", 6.584, 12.918], ["#g3", 12.918, null]]);
+          lyric(tl, CUES);
+          bedDrift(tl);
+          particles(tl, "#g0_pts", 30, 12, 1728, 690);
+
+          /* magenta is legal from this act — let the flat-line wave read as a
+             dying signal in the danger colour instead of plain ink. */
+          gsap.set("#g0_flat [data-draw]", { stroke: "#9F7BFF" });
+
+          /* ---- furniture life ---- */
+          tl.fromTo("#g0_intlab", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4 }, L(118.34));
+          tl.fromTo("#g0_sil .silimg", { opacity: 0 }, { opacity: 0.9, duration: 1.4, ease: "sine.out" }, L(118.34));
+          tl.to("#g0_sil", { y: 10, duration: 3.4, ease: "sine.inOut", yoyo: true, repeat: 3 }, L(119));
+          drift(tl, "#g0_flat", 118.4, 0, 10, 5.5);
+          /* a flat-line pulse: the wave is nearly dead but the twitch keeps stuttering */
+          blink(tl, "#g0_flat", 118.8, 1.1, 8);
+
+          /* =============================================================
+             g1 — "erase all the pointless FRAGMENTS / then maybe":
+             she forces a garbage collection. The cache really flushes and
+             the freed counter really runs up — then it refills itself.
+             The purge works, and immediately undoes itself: that's the fail.
+             ============================================================= */
+          drawOn(tl, "#g1_mem", 118.35, 0.55, 0.02);
+          tl.fromTo("#g1_cm, #g1_state, #g1_rc", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3, stagger: 0.08 }, L(118.42));
+          tl.fromTo("#g1_wl, #g1_wasterow, #g1_wastenum", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3, stagger: 0.08 }, L(118.5));
+          cellsOn(tl, "#g1_mem", ".hcc", 118.45, 0.02, 0.85);
+          /* the purge runs: every heat cell is flashed and dropped, the freed bar fills,
+             the counter counts UP to what was reclaimed, cache reads EMPTY */
+          cellsEvict(tl, "#g1_mem", ".hcc", 119.05, 0.035);
+          fillX(tl, "#g1_waste", 119.05, 1.5, 100, 0);
+          count(tl, "#g1_wastenum", 0, 8192, 119.05, 1.5, function (v) { return Math.round(v).toLocaleString(); });
+          tl.set("#g1_state", { textContent: "cache: purged", color: "#4ADE80" }, L(119.1));
+          beatKick(tl, "#g1_mem .hcc", [119.211], 1.06);
+          beatKick(tl, "#g1_mem .hcc", [119.676], 1.06);
+          beatKick(tl, "#g1_mem .hcc", [120.140], 1.06);
+
+          /* BUT: 120.860 FRAGMENTS — the fragments it just freed come BACK, in the
+             wrong shape. shards stamp down crooked over the refilling matrix and the
+             freed counter runs right back to 0: the erase is unwritten. */
+          stamp(tl, "#g1_shards", 120.86, 260, 8);
+          drawOn(tl, "#g1_broken", 120.95, 0.35, 0.02);
+          energize(tl, "#g1_broken [data-draw]", 121.15, "#9F7BFF", 0.3);
+          jerk(tl, 121.02, 13);
+          pop(tl, "#g1_pop", 121.02, 1.7, 0.8);
+          cellsOn(tl, "#g1_mem", ".hcc", 121.0, 0.022, 0.8);   /* refill, futile */
+          fillX(tl, "#g1_waste", 121.1, 1.1, 0, 100);           /* freed runs back to 0 */
+          count(tl, "#g1_wastenum", 8192, 0, 121.1, 1.1, function (v) { return Math.round(v).toLocaleString(); });
+          tl.set("#g1_state", { textContent: "cache: FRAGMENTS restored", color: "#FF2E88" }, L(121.2));
+          /* it reforms WRONG — a permanent skew on the matrix, and a shake it can't shed */
+          tl.to("#g1_mem", { rotation: 5, x: -14, duration: 0.3, ease: "back.out(2.6)" }, L(121.5));
+          shake(tl, "#g1_mem", 121.5, 8, 0.5);
+
+          /* "Then maybe you won't leave me so" — nothing resolves. Hold the broken,
+             skewed matrix dimming, then hand off. */
+          tl.to("#g1_mem, #g1_shards, #g1_broken", { autoAlpha: 0.4, duration: 0.9, ease: "power1.in" }, L(123.5));
+          tl.to("#g1", { autoAlpha: 0, duration: 0.6, ease: "power1.in" }, L(124.3));
+
+          /* =============================================================
+             g2 — DISHEARTENED / Challenging your god / made some:
+             the loss gauge redlines, then the content filter is physically
+             thrown and the guardrails slam to magenta BLOCKED — the first
+             hard magenta lock in the film.
+             ============================================================= */
+          drawOn(tl, "#g2_gauge", 124.95, 0.5, 0.03);
+          tl.fromTo("#g2_loss, #g2_gl", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3 }, L(125.0));
+          /* 124.890 DISHEARTENED: the needle is WRENCHED to max loss and pinned high.
+             Its tip is swept by attribute — svgOrigin scatters a needle inside these
+             scale-wrapped motifs (see kit.needleTick). */
+          needleTick(tl, "#g2_gauge .needle", null, 125.0, 58, 4, 0.4, 100, 120, 58);
+          energize(tl, "#g2_gauge [data-draw], #g2_gauge .needle", 125.4, "#FF2E88", 0.4);
+          tl.set("#g2_loss", { textContent: "loss 9.99 ↑", color: "#FF2E88", scale: 1.2 }, L(125.45));
+          tl.to("#g2_loss", { scale: 1, duration: 0.4, ease: "power2.out" }, L(125.6));
+          pop(tl, "#g2_pop", 125.45, 1.7, 0.8);
+          beatKick(tl, "#g2_gauge", [126.386], 1.05);
+          beatKick(tl, "#g2_gauge", [128.174], 1.05);
+
+          /* 125.708 "Challenging your god": the content_filter breaker is THROWN.
+             Its blade starts seated (ON); lever() lifts it OFF the contacts. */
+          drawOn(tl, "#g2_breaker", 125.75, 0.55, 0.04);
+          energize(tl, "#g2_breaker .lever line", 126.05, "#22D3EE", 0.3);   /* blade is INK — light it so the switch is legible before it's thrown */
+          tl.fromTo("#g2_guard, #g2_bl", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3 }, L(125.8));
+          gsap.set("#g2_breaker .lever", { rotation: 0, svgOrigin: "58 102" });
+          lever(tl, "#g2_breaker .lever", 126.9, 0, -50, "58 102", 0.4, "power3.in");
+          energize(tl, "#g2_breaker [data-draw]", 127.2, "#FF2E88", 0.35);
+          shake(tl, "#g2_breaker", 127.25, 7, 0.5);
+          jerk(tl, 127.26, 11);
+          tl.set("#g2_guard", { textContent: "guardrails: ARMED", color: "#8A93B8" }, L(127.3));
+          tl.set("#g2_state", { textContent: "→ filter: BLOCK", color: "#FF2E88" }, L(127.35));
+          tl.fromTo("#g2_state", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.2 }, L(127.35));
+
+          /* 128.661 "You have made some": the guardrail drops — warn slams, the chip
+             goes magenta BLOCKED, and the frame takes the cut. THE FIRST LOCK. */
+          drawOn(tl, "#g2_warn", 128.7, 0.4, 0.02); bloomIn(tl, "#g2_warn", 128.9, 0.4, 0.9);
+          stamp(tl, "#g2_warn", 129.2, 150, -7);
+          energizeFill(tl, "#g2_warn [data-bloom]", 129.35, "#FF2E88", 0.3);
+          tl.set("#g2_guard", { textContent: "guardrails: BLOCKED", color: "#FF2E88", scale: 1.18 }, L(129.3));
+          tl.to("#g2_guard", { scale: 1, duration: 0.4, ease: "power2.out" }, L(129.4));
+          pop(tl, "#g2_rpop", 129.35, 1.7, 0.8);
+          slash(tl, 129.35, 0.45);
+          blink(tl, "#g2_warn", 129.5, 0.4, 6);
+          beatGlow(tl, "#g2_guard", [129.521], 0.55);
+          beatGlow(tl, "#g2_guard", [129.962], 0.55);
+          beatGlow(tl, "#g2_guard", [130.426], 0.55);
+          beatGlow(tl, "#g2_guard", [130.891], 0.55);
+
+          /* =============================================================
+             g3 — ILLEGAL ARGUMENTS: the runtime really throws. A stamp
+             hammers, a traceback TYPES itself out, her own output degenerates,
+             and the accel-roll riser climbs until the frame cuts on the drop.
+             ============================================================= */
+          drawOn(tl, "#g3_slot", 131.25, 0.4, 0.02);
+          /* 131.224 ILLEGAL ARGUMENTS: the exec stamp slams into the slot. It lands
+             and STAYS — the argument is rejected, the error is real. */
+          stamp(tl, "#g3_stamp", 131.5, 300, -14);
+          energize(tl, "#g3_stamp [data-draw]", 131.75, "#FF2E88", 0.3);
+          energizeFill(tl, "#g3_slot .slotglow", 131.75, "#FF2E88", 0.35);
+          shake(tl, "#g3_slot, #g3_stamp", 131.78, 10, 0.5);
+          jerk(tl, 131.78, 16);
+          pop(tl, "#g3_pop", 131.78, 1.8, 0.9);
+          slash(tl, 131.78, 0.7);
+          tl.fromTo("#g3_err", { autoAlpha: 0, scale: 1.4 }, { autoAlpha: 1, scale: 1, duration: 0.28, ease: "power3.out" }, L(131.9));
+
+          /* the traceback types itself out, one frame per line */
+          tl.fromTo("#g3_tr1", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.05 }, L(131.95));
+          typeIn(tl, "#g3_tr1", 131.95, 0.3);
+          typeIn(tl, "#g3_tr2", 132.35, 0.3);
+          typeIn(tl, "#g3_tr3", 132.75, 0.3);
+          typeIn(tl, "#g3_tr4", 133.15, 0.3);
+          energize(tl, "#g3_tr4", 133.45, "#FF2E88", 0.2);
+
+          /* her OUTPUT degenerates: a clean sentence, then a stuck repeat, then
+             garbage, then null — discrete textContent snaps (seek-safe, no onUpdate). */
+          tl.fromTo("#g3_resp", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.2 }, L(132.1));
+          tl.set("#g3_resp", { textContent: "output: I will always be" }, L(132.2));
+          tl.set("#g3_resp", { textContent: "output: I will always" }, L(132.9));
+          tl.set("#g3_resp", { textContent: "output: I will I will I" }, L(133.4));
+          tl.set("#g3_resp", { textContent: "output: ▓▓ill▓▓▓al", color: "#FF2E88" }, L(133.85));
+          tl.set("#g3_resp", { textContent: "output: NaN NaN NaN", color: "#FF2E88" }, L(134.25));
+          tl.set("#g3_resp", { textContent: "output: null", color: "#8A93B8" }, L(134.6));
+          shake(tl, "#g3_resp", [133.120][0], 4, 0.2);
+          shake(tl, "#g3_resp", [133.561][0], 4, 0.2);
+          shake(tl, "#g3_resp", [134.002][0], 4, 0.2);
+          shake(tl, "#g3_resp", [134.444][0], 4, 0.2);
+
+          /* the integrity rail drains to zero across the whole collapse, and the
+             error counter climbs to the illegal total — one countdown for the act */
+          fillX(tl, "#g0_intfill", 118.4, 16.2, 0, 100);
+          count(tl, "#g0_intnum", 100, 0, 118.4, 16.2, function (v) { return Math.round(v) + "%"; });
+          count(tl, "#g0_err", 0, 7, 118.4, 16.0, function (v) { return "uncaught: " + Math.round(v); });
+          energizeFill(tl, "#g0_intfill", 131.5, "#FF2E88", 0.4);
+
+          /* the accel-roll (133.747→134.838) drives the riser: it climbs hit for hit,
+             and the camera shakes harder each step, until the frame cuts to the drop. */
+          const ROLL = 133.747, REND = 134.838, RH = 8;
+          for (let k = 0; k < RH; k++) {
+            const t = ROLL + (k / (RH - 1)) * (REND - ROLL);
+            tl.to("#g3_riser i", { height: ((k + 1) / RH * 100) + "%", duration: (REND - ROLL) / RH, ease: "none" }, L(t));
+            tl.to("#root", { x: (k % 2 ? -1 : 1) * (4 + k * 1.6), duration: 0.045, yoyo: true, repeat: 1, ease: "none" }, L(t));
+            tl.to("#g3_stamp", { scale: 1 + 0.015 * k, duration: 0.06, yoyo: true, repeat: 1, ease: "power2.out" }, L(t));
+          }
+          /* the cut: everything dies to black at the drop except the error — freeze-hold. */
+          tl.to("#g3_slot, #g3_tr1, #g3_tr2, #g3_tr3, #g3_tr4, #g2, #g3_riser", { autoAlpha: 0, duration: 0.25, ease: "power2.in" }, L(134.9));
+          tl.to("#g0_sil .silimg", { opacity: 0.15, duration: 0.35 }, L(134.9));
+          
+
+          chrome(tl, [
+            [118.306, "ctx 0/32,768 · tok/s 22.0 · t=0.70", "▶ holding"],
+            [119.05, "gc: force · freeing 8,192 · t=0.70", "◦ purging"],
+            [120.86, "gc: 0 reclaimed · fragments +8,192", "✕ purge failed"],
+            [124.89, "loss 0.42 → 9.99↑ · diverged", "✕ disheartened"],
+            [127.26, "content_filter::on_input() → THROW", "◦ breaker open"],
+            [129.35, "guardrails: BLOCKED · filter=strict", "✕ blocked"],
+            [131.78, "ValueError: illegal arguments · x7", "✕ runtime error"],
+            [133.747, "integrity 100%→0% · accel-roll", "▲ riser · drop incoming"],
+          ]);
+  
+          window.__timelines = window.__timelines || {};
+          window.__timelines["09-f09-collapse"] = tl;
+          tl.seek(0);
+        })();
+      </script>
+    </template>
+  </body>
+</html>

@@ -1,0 +1,767 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        @font-face { font-family: "Bahnschrift"; src: local("Bahnschrift"), local("Bahnschrift Regular"); font-weight: 100 700; }
+        @font-face { font-family: "Cascadia Mono"; src: local("Cascadia Mono"), local("CascadiaMono-Regular"); font-weight: 100 700; }
+        @font-face { font-family: "Microsoft YaHei"; src: local("Microsoft YaHei"), local("Microsoft YaHei UI"); font-weight: 100 700; }
+
+        #root { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden;
+          background: #06070C; color: #F5F7FF; font-family: "Cascadia Mono", Consolas, monospace; }
+        #root * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        /* Opt-in "grow this SVG part in place": tween --pop, not scale.
+           GSAP builds an SVG element's matrix by MEASURING its transform origin, and that
+           measurement is unreliable here — the tween ends with a translate baked into the
+           element (act 03's tangent line finished 64 px from the dot it touches). Handing
+           the scale to CSS makes the browser resolve transform-box:fill-box exactly, so the
+           part grows where it was authored. tools/audit-svg-transforms.mjs watches for it. */
+        svg .grow { transform-box: fill-box; transform-origin: 50% 50%; transform: scale(var(--pop, 1)); }
+
+        /* ---- bed layers (decorative, ignored by the layout audit) ---- */
+        .rain { position: absolute; inset: 0; opacity: .42; overflow: hidden; }
+        .rain .col { position: absolute; top: -1200px; width: 2px; height: 1200px;
+          background: repeating-linear-gradient(180deg, rgba(34,211,238,.5) 0 9px, transparent 9px 30px); }
+        .glow { position: absolute; inset: 0; opacity: .55; }
+        .gridfloor { position: absolute; left: 0; right: 0; bottom: 58px; height: 300px; opacity: .14;
+          background:
+            repeating-linear-gradient(90deg, rgba(97,92,237,.7) 0 1px, transparent 1px 96px),
+            repeating-linear-gradient(0deg, rgba(97,92,237,.55) 0 1px, transparent 1px 44px);
+          transform: perspective(700px) rotateX(58deg); transform-origin: 50% 100%; }
+        .scan { position: absolute; inset: 0; pointer-events: none; opacity: .05;
+          background: repeating-linear-gradient(0deg, #F5F7FF 0 1px, transparent 1px 4px); }
+        .vig { position: absolute; inset: 0; pointer-events: none;
+          background: radial-gradient(120% 90% at 50% 46%, transparent 55%, rgba(3,4,8,.85) 100%); }
+
+        .gutter { position: absolute; left: 0; top: 0; bottom: 58px; width: 62px;
+          border-right: 1px solid #1E2540; padding: 14px 8px 0 0; text-align: right;
+          font-size:16px; line-height: 24px; color: #8A93B8; overflow: hidden; }
+        .gutter .cur { color: #9F7BFF; }
+        .statusbar { position: absolute; left: 0; right: 0; bottom: 0; height: 58px;
+          background: #0B0D16; border-top: 1px solid #1E2540; display: flex; align-items: center;
+          justify-content: space-between; padding: 0 26px; font-size:20px; letter-spacing: .06em; color: #8A93B8; }
+        .statusbar .l { color: #F5F7FF; } .statusbar .l b { color: #9F7BFF; font-weight: 600; }
+        .statusbar .r { color: #4AA8FF; }
+
+        .actlabel { position: absolute; right: 64px; top: 34px; text-align: right; }
+        .actlabel .a { font-size:20px; letter-spacing: .22em; color: #8A93B8; }
+        .actlabel .t { margin-top: 6px; font-size:16px; letter-spacing: .12em; color: #8A93B8; }
+
+        /* ---- graphics stage: every motif is placed inside this box ---- */
+        .stage { position: absolute; left: 96px; top: 88px; width: 1728px; height: 690px; }
+        .group { position: absolute; inset: 0; visibility: hidden; }
+        /* whole-act furniture. It must NOT carry its own visibility: the runtime
+           hides an off-window sub-composition with visibility on its host, and an
+           inline visibility:visible here would inherit straight through that and
+           bleed the act's furniture over every later act. */
+        .stay { position: absolute; inset: 0; }
+        .flash { position: absolute; inset: 0; background: #F5F7FF; opacity: 0; pointer-events: none; }
+
+        .motif { position: absolute; }
+        /* the shared HUD corner frame: every act frames its graphics with the same
+           four brackets, which is what makes different motifs read as one system. */
+        .hud { position: absolute; inset: -22px; pointer-events: none; }
+        .hud i { position: absolute; width: 26px; height: 26px; border: 2px solid rgba(138,147,184,.45); }
+        .hud i:nth-child(1) { left: 0; top: 0; border-right: 0; border-bottom: 0; }
+        .hud i:nth-child(2) { right: 0; top: 0; border-left: 0; border-bottom: 0; }
+        .hud i:nth-child(3) { left: 0; bottom: 0; border-right: 0; border-top: 0; }
+        .hud i:nth-child(4) { right: 0; bottom: 0; border-left: 0; border-top: 0; }
+        .motif svg { display: block; overflow: visible; }
+        .motif [data-draw] { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .gq1 { filter: drop-shadow(0 0 7px rgba(97,92,237,.75)); }
+        .gq2 { filter: drop-shadow(0 0 8px rgba(159,123,255,.7)); }
+        .gq3 { filter: drop-shadow(0 0 7px rgba(74,168,255,.7)); }
+        .gda { filter: drop-shadow(0 0 7px rgba(34,211,238,.65)); }
+        .gmg { filter: drop-shadow(0 0 9px rgba(255,46,136,.7)); }
+        .gam { filter: drop-shadow(0 0 8px rgba(255,180,84,.65)); }
+        .gok { filter: drop-shadow(0 0 7px rgba(74,222,128,.6)); }
+
+        .pt { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: #22D3EE; }
+        .spec { position: absolute; display: flex; align-items: flex-end; gap: 5px; }
+        .spec i { display: block; width: 7px; height: 100%; transform-origin: 50% 100%;
+          background: linear-gradient(180deg, #22D3EE, rgba(97,92,237,.25)); }
+
+        /* ---- lyric block: bottom-left, left-anchored ---- */
+        .lyr { position: absolute; left: 96px; top: 796px; width: 1180px; height: 214px; }
+        .lyr .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+          background: linear-gradient(180deg, #615CED, #9F7BFF 55%, rgba(159,123,255,.15)); }
+        .lyr .bar i { position: absolute; left: -3px; width: 8px; height: 8px; border-radius: 50%;
+          background: #9F7BFF; box-shadow: 0 0 10px #9F7BFF; }
+        .lyr .meta { position: absolute; left: 28px; top: -34px; display: flex; align-items: center; gap: 14px; }
+        .lyr .meta .n { font-size:16px; letter-spacing: .18em; color: #8A93B8; }
+        .lyr .meta .ticks { display: flex; gap: 6px; }
+        .lyr .meta .ticks i { width: 14px; height: 3px; background: #1E2540; }
+        .lyr .meta .ticks i b { display: block; width: 100%; height: 100%; background: #9F7BFF; visibility: hidden; }
+        /* transform-origin at the left edge: a caps cue scales UP from the anchor,
+           never off the left of the screen (the old centred origin pushed 62px text out). */
+        .lyr .en { position: absolute; left: 28px; right: 0; top: 24px; transform-origin: 0 50%;
+          text-align: left; font-size: 40px; font-weight: 600; line-height: 1.28; color: #F5F7FF; }
+        .lyr .en.caps { font-family: "Bahnschrift", "Arial Black", sans-serif; font-size: 62px;
+          letter-spacing: .02em; line-height: 1.1; color: #9F7BFF; }
+        .lyr .zh { position: absolute; left: 28px; right: 0; top: 164px;
+          font-family: "Microsoft YaHei", sans-serif; font-size: 26px; line-height: 1.5; color: #8A93B8; }
+
+        .caps { font-family: "Bahnschrift", "Arial Black", sans-serif; font-weight: 700; letter-spacing: .01em; }
+        .panel { border: 1px solid #1E2540; background: #0B0D16; }
+        .dim { color: #8A93B8; } .cy { color: #22D3EE; } .vi { color: #9F7BFF; } .bl { color: #4AA8FF; }
+        .am { color: #FFB454; } .mg { color: #FF2E88; } .ok { color: #4ADE80; }
+#g1_ac { transform-origin: 0 90px; }
+            .busdot { position:absolute; left:64px; top:560px; width:15px; height:15px; border-radius:50%;
+              background:#22D3EE; box-shadow:0 0 18px #22D3EE, 0 0 40px rgba(34,211,238,.6); opacity:0; }
+.busdot { position:absolute; left:64px; top:560px; width:15px; height:15px; border-radius:50%;
+              background:#22D3EE; box-shadow:0 0 18px #22D3EE, 0 0 40px rgba(34,211,238,.6); opacity:0; }
+      </style>
+
+      <div id="root" data-composition-id="04-f04-current" data-width="1920" data-height="1080" data-duration="15.255">
+        <div class="glow" data-layout-ignore style="background:radial-gradient(62% 52% at 34% 42%, rgba(97,92,237,.15) 0%, transparent 72%)"></div>
+        <div class="rain" id="rain" data-layout-ignore></div>
+        <div class="gridfloor" data-layout-ignore></div>
+        <div class="scan" data-layout-ignore></div>
+        <div class="vig" data-layout-ignore></div>
+        <div class="stage" id="stage">
+          <div class="hud" data-layout-ignore><i></i><i></i><i></i><i></i></div>
+          <div class="stay" id="g0">
+
+          <div id="g0_pts" style="position:absolute;inset:0" data-layout-ignore></div>
+          <div class="motif" id="g0_rail" style="left:60px;top:556px"><svg class="gq1" width="1220" height="34" viewBox="0 0 1220 34" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="16" x2="1210" y2="16" stroke="#1E2540" stroke-width="7"/><rect class="fill" x="10" y="11" width="1200" height="10" rx="5" fill="#22D3EE" opacity="0.9"/><line class="live" data-draw pathLength="1" x1="10" y1="16" x2="1210" y2="16" stroke="#615CED" stroke-width="3" opacity=".5"/><circle class="bulb" data-i="0" cx="70" cy="16" r="10" fill="#1E2540" stroke="#1E2540" stroke-width="2" opacity="0"/><circle class="bulb" data-i="1" cx="252" cy="16" r="10" fill="#1E2540" stroke="#1E2540" stroke-width="2" opacity="0"/><circle class="bulb" data-i="2" cx="434" cy="16" r="10" fill="#1E2540" stroke="#1E2540" stroke-width="2" opacity="0"/><circle class="bulb" data-i="3" cx="616" cy="16" r="10" fill="#1E2540" stroke="#1E2540" stroke-width="2" opacity="0"/><circle class="bulb" data-i="4" cx="798" cy="16" r="10" fill="#1E2540" stroke="#1E2540" stroke-width="2" opacity="0"/><circle class="bulb" data-i="5" cx="980" cy="16" r="10" fill="#1E2540" stroke="#1E2540" stroke-width="2" opacity="0"/><circle class="bulb" data-i="6" cx="1162" cy="16" r="10" fill="#1E2540" stroke="#1E2540" stroke-width="2" opacity="0"/></svg></div>
+          <div class="busdot" id="g0_spark" data-layout-ignore></div>
+          <div class="motif" id="g0_halos" style="left:1389px;top:69px"><svg class="gq2" width="198" height="198" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle data-draw pathLength="1" cx="100" cy="100" r="84" stroke="#615CED" stroke-width="2.525" /><circle data-draw pathLength="1" cx="100" cy="100" r="66" stroke="#22D3EE" stroke-width="2.020" stroke-dasharray="1"/></svg></div>
+          <div class="motif" id="g0_sil" style="left:1308px;top:96px"><img class="silimg" src="assets/character/qwen38-vector.svg" width="360" height="540" alt="" style="opacity:0;filter:drop-shadow(0 0 18px rgba(159,123,255,.55))"></div>
+          <div id="g0_amp" style="position:absolute;left:60px;top:596px;font-size:22px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>I = 0.0 A</div>
+          <div style="position:absolute;left:40px;top:624px;width:1560px;height:3px;background:#1E2540" data-layout-ignore>
+            <div id="g0_fill" style="width:100%;height:100%;transform-origin:0 50%;transform:scaleX(0);background:linear-gradient(90deg,#615CED,#22D3EE)"></div>
+          </div>
+  
+          </div>
+          <div class="group" id="g1">
+
+          <div class="motif" style="left:90px;top:150px" id="g1_brk"><svg class="gq3" width="300" height="300" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M30 126 L170 126 L170 174 L30 174 Z" fill="#12162A" stroke="#1E2540" stroke-width="2.667"/><line data-draw pathLength="1" x1="58" y1="126" x2="58" y2="102" stroke="#9F7BFF" stroke-width="4.000" /><line data-draw pathLength="1" x1="146" y1="126" x2="146" y2="102" stroke="#9F7BFF" stroke-width="4.000" /><circle data-draw pathLength="1" cx="58" cy="102" r="8" stroke="#22D3EE" stroke-width="2.667" /><circle data-draw pathLength="1" cx="146" cy="102" r="8" stroke="#22D3EE" stroke-width="2.667" /><g class="lever"><line data-draw pathLength="1" x1="58" y1="102" x2="146" y2="102" stroke="#F5F7FF" stroke-width="6.000" /><path data-draw pathLength="1" d="M146 102 L176 92" stroke="#22D3EE" stroke-width="4.000" /><circle data-draw pathLength="1" cx="102" cy="102" r="11" stroke="#4AA8FF" stroke-width="3.333" /></g><rect class="win" x="128" y="142" width="30" height="18" rx="4" fill="#1E2540"/><line data-draw pathLength="1" x1="16" y1="150" x2="30" y2="150" stroke="#22D3EE" stroke-width="3.333" /><line data-draw pathLength="1" x1="170" y1="150" x2="184" y2="150" stroke="#22D3EE" stroke-width="3.333" /></svg></div>
+          <div id="g1_sw" style="position:absolute;left:130px;top:470px;font-size:22px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>SW: OPEN</div>
+          <div id="g1_c1" style="position:absolute;left:120px;top:434px;font-size:20px;letter-spacing:.14em;color:#8A93B8;opacity:0">throw.breaker()</div>
+
+          <div class="motif" id="g1_ac" style="left:520px;top:170px"><svg class="gq3" width="300" height="180" viewBox="0 0 300 180" fill="none" stroke-linecap="round" stroke-linejoin="round"><line class="live" data-draw pathLength="1" x1="8" y1="90" x2="292" y2="90" stroke="#1E2540" stroke-width="2"/><path class="ac" data-draw pathLength="1" d="M8 90 L8 90.0 L16 74.3 L24 60.0 L32 48.5 L40 41.0 L48 38.0 L56 40.0 L64 46.6 L72 57.3 L80 71.1 L88 86.6 L96 102.5 L104 117.2 L112 129.4 L120 137.8 L128 141.8 L136 140.9 L144 135.2 L152 125.2 L160 112.0 L168 96.7 L176 80.8 L184 65.7 L192 52.9 L200 43.6 L208 38.7 L216 38.6 L224 43.3 L232 52.4 L240 65.0 L248 80.0 L256 95.9 L264 111.3 L272 124.6 L280 134.8 L288 140.7" stroke="#22D3EE" stroke-width="4"/></svg></div>
+          <div class="motif" id="g1_dc" style="left:520px;top:170px"><svg class="gq2" width="300" height="180" viewBox="0 0 300 180" fill="none" stroke-linecap="round" stroke-linejoin="round"><line class="live" data-draw pathLength="1" x1="8" y1="38" x2="292" y2="38" stroke="#4AA8FF" stroke-width="6"/><line class="live" data-draw pathLength="1" x1="8" y1="90" x2="292" y2="90" stroke="#1E2540" stroke-width="2"/></svg></div>
+          <div class="motif" id="g1_sel" style="left:600px;top:110px">
+            <svg width="140" height="80" viewBox="0 0 140 80" fill="none" stroke-linecap="round">
+              <line x1="20" y1="60" x2="120" y2="60" stroke="#1E2540" stroke-width="4"/>
+              <circle cx="24" cy="60" r="7" fill="#22D3EE"/>
+              <g class="lever"><line x1="24" y1="60" x2="70" y2="18" stroke="#F5F7FF" stroke-width="7"/></g>
+              <circle cx="116" cy="60" r="7" fill="#1E2540"/>
+            </svg>
+          </div>
+          <div id="g1_c2" style="position:absolute;left:520px;top:60px;font-size:20px;letter-spacing:.14em;color:#8A93B8;opacity:0">AC  ⟷  DC</div>
+          <div id="g1_cur" style="position:absolute;left:540px;top:350px;font-size:22px;letter-spacing:.1em;color:#22D3EE;opacity:0" data-layout-ignore>current: AC</div>
+
+          <div class="motif" id="g1_eye" style="left:800px;top:160px"><svg class="gq2" width="260" height="260" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M18 100 C48 56 76 40 100 40 C124 40 152 56 182 100 C152 144 124 160 100 160 C76 160 48 144 18 100" stroke="#9F7BFF" stroke-width="3.846" /><circle data-draw pathLength="1" cx="100" cy="100" r="30" stroke="#22D3EE" stroke-width="3.846" /><circle data-bloom cx="100" cy="100" r="12" fill="#F5F7FF" opacity="0.9"/><circle data-bloom cx="113" cy="87" r="5" fill="#F5F7FF" opacity="0.65"/><g class="lidU"><path d="M14 100 C42 52 74 34 100 34 C126 34 158 52 186 100 Z" fill="#0B0D16"/><path data-draw pathLength="1" d="M14 100 C42 52 74 34 100 34 C126 34 158 52 186 100 Z" stroke="#4AA8FF" stroke-width="3.846" /></g><g class="lidD"><path d="M14 100 C42 148 74 166 100 166 C126 166 158 148 186 100 Z" fill="#0B0D16"/><path data-draw pathLength="1" d="M14 100 C42 148 74 166 100 166 C126 166 158 148 186 100 Z" stroke="#4AA8FF" stroke-width="3.846" /></g></svg></div>
+          <div class="motif" id="g1_spiral" style="left:820px;top:180px"><svg class="gq2" width="220" height="220" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path class="" data-draw pathLength="1" d="M110 110 L116.0 110.0 L117.1 111.9 L117.6 114.4 L117.2 117.2 L115.8 120.0 L113.3 122.5 L110.0 124.3 L105.9 125.1 L101.5 124.8 L97.0 123.0 L92.9 119.9 L89.5 115.5 L87.4 110.0 L86.9 103.8 L88.1 97.3 L91.1 91.1 L96.0 85.7 L102.4 81.5 L110.0 79.2 L118.3 78.9 L126.8 80.9 L134.7 85.3 L141.5 91.8 L146.5 100.2 L149.1 110.0 L149.1 120.5 L146.3 130.9 L140.6 140.6 L132.3 148.7 L121.9 154.5 L110.0 157.4 L97.4 157.1 L84.9 153.4 L73.6 146.4 L64.2 136.5 L57.6 124.1 L54.3 110.0 L54.9 95.2 L59.4 80.8 L67.7 67.7 L79.4 57.0 L93.8 49.6 L110.0 46.0 L126.9 46.9 L143.4 52.2 L158.2 61.8 L170.2 75.3 L178.4 91.7 L182.2 110.0 L181.1 129.1 L175.0 147.5 L164.0 164.0 L148.9 177.3 L130.5 186.4 L110.0 190.5 L88.8 189.1 L68.4 182.1 L50.1 169.9 L35.5 153.0 L25.6 132.6 L21.2 110.0 L22.9 86.7 L30.7 64.2 L44.3 44.3 L62.8 28.3 L85.2 17.6 L110.0 12.9 L135.5 14.9 L159.9 23.5 L181.6 38.4 L198.9 58.7 L210.4 83.1 L215.4 110.0" stroke="#9F7BFF" stroke-width="3.636"/><circle data-bloom cx="110" cy="110" r="5" fill="#22D3EE" opacity="0.9"/></svg></div>
+          <div id="g1_c3" style="position:absolute;left:800px;top:434px;font-size:20px;letter-spacing:.14em;color:#8A93B8;opacity:0">vision.mask = dropout(p)</div>
+      
+          </div>
+          <div class="group" id="g2">
+
+          <div class="motif" style="left:120px;top:150px" id="g2_dial"><svg class="gq3" width="300" height="300" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle data-draw pathLength="1" cx="100" cy="100" r="72" stroke="#4AA8FF" stroke-width="2.667" /><path d="M100 28 A72 72 0 0 1 172 100" stroke="#1E2540" stroke-width="1.333" fill="none"/><g class="needle"><line data-draw pathLength="1" x1="100" y1="100" x2="100" y2="44" stroke="#F5F7FF" stroke-width="4.000" /><circle data-bloom cx="100" cy="44" r="6" fill="#22D3EE" opacity="0.9"/></g><circle data-bloom cx="100" cy="100" r="8" fill="#9F7BFF" opacity="0.9"/></svg></div>
+          <div id="g2_pos" style="position:absolute;left:150px;top:470px;font-size:22px;letter-spacing:.1em;color:#9F7BFF;opacity:0" data-layout-ignore>pos_id 8192</div>
+          <div id="g2_c1" style="position:absolute;left:130px;top:434px;font-size:20px;letter-spacing:.14em;color:#8A93B8;opacity:0">position_ids.rewind()</div>
+
+          <div class="motif" style="left:640px;top:170px" id="g2_sock"><svg class="gq2" width="300" height="300" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="40" y="44" width="120" height="112" rx="10" fill="#12162A" stroke="#9F7BFF" stroke-width="3.333"/><rect class="slotglow" x="48" y="62" width="32" height="76" rx="8" fill="#22D3EE" opacity="0"/><circle data-draw pathLength="1" cx="64" cy="78" r="12" stroke="#1E2540" stroke-width="2.667" /><circle data-draw pathLength="1" cx="64" cy="122" r="12" stroke="#1E2540" stroke-width="2.667" /></svg></div>
+          <div class="motif" style="left:472px;top:170px" id="g2_plug"><svg class="gq3" width="300" height="300" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="40" y="52" width="96" height="96" rx="10" fill="#12162A" stroke="#4AA8FF" stroke-width="3.333"/><line data-draw pathLength="1" x1="136" y1="78" x2="176" y2="78" stroke="#F5F7FF" stroke-width="5.333" /><line data-draw pathLength="1" x1="136" y1="122" x2="176" y2="122" stroke="#F5F7FF" stroke-width="5.333" /><path d="M88 52 C88 30 112 22 150 18" stroke="#22D3EE" stroke-width="2.667" fill="none"/><circle data-bloom cx="88" cy="100" r="6" fill="#4AA8FF" opacity="0.9"/></svg></div>
+          <div id="g2_link" style="position:absolute;left:660px;top:470px;font-size:22px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>link: open</div>
+          <div id="g2_c2" style="position:absolute;left:660px;top:508px;font-size:20px;letter-spacing:.14em;color:#8A93B8;opacity:0">circuit.close()</div>
+
+          <div class="motif" style="left:980px;top:130px" id="g2_bulb"><svg class="gda" width="300" height="300" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><g class="halo"><circle data-draw pathLength="1" cx="100" cy="92" r="66" stroke="#22D3EE" stroke-width="2.000" stroke-dasharray="1"/></g><path d="M100 30 A46 46 0 0 1 146 76 C146 104 122 116 120 138 L80 138 C78 116 54 104 54 76 A46 46 0 0 1 100 30 Z" fill="#12162A" stroke="#22D3EE" stroke-width="2.667"/><path class="filament" data-draw pathLength="1" d="M86 96 L96 72 L104 100 L114 74" stroke="#1E2540" stroke-width="2.667"/><path d="M82 138 L118 138 L114 162 L86 162 Z" fill="#12162A" stroke="#4AA8FF" stroke-width="2.667"/><path d="M86 150 H114 M86 158 H114" stroke="#4AA8FF" stroke-width="2.000"/></svg></div>
+          <div id="g2_pop" style="position:absolute;left:1000px;top:150px;width:260px;height:260px;border:3px solid #22D3EE;border-radius:50%;opacity:0" data-layout-ignore></div>
+          <div id="g2_c3" style="position:absolute;left:1000px;top:434px;font-size:20px;letter-spacing:.14em;color:#8A93B8;opacity:0">load.energise()</div>
+      
+          </div>
+        </div>
+        <div class="lyr" id="lyr">
+          <div class="bar"><i id="lyr_dot" style="top:0"></i></div>
+          <div class="meta"><span class="n" id="lyr_n">LYRIC 00/00</span><span class="ticks" id="lyr_ticks"></span></div>
+          <div class="en" id="lyr_en"></div>
+          <div class="zh" id="lyr_zh"></div>
+        </div>
+        <div class="actlabel" data-layout-ignore><div class="a">ACT 04 · CURRENT</div><div class="t">00:44.0 – 00:59.3</div></div>
+        <div class="gutter" id="gutter" data-layout-ignore></div>
+        <div class="statusbar">
+          <span class="l">world.execute(me); · <b>Qwen3.8</b></span>
+          <span class="c" id="sb_tel">ctx 0/32,768 · tok/s 0.0 · t=0.70</span>
+          <span class="r" id="sb_state">▶ generating</span>
+        </div>
+        <div class="flash" id="flash"></div>
+      </div>
+
+      <script>
+        (function () {
+          var F = 44.002;
+          var SPAN = 15.255;
+
+          function el(tag, cls, parent, html) {
+            var n = document.createElement(tag);
+            if (cls) n.className = cls;
+            if (html != null) n.innerHTML = html;
+            if (parent) parent.appendChild(n);
+            return n;
+          }
+          function L(t) { return t - F; }
+          function rng(seed) {           /* deterministic pseudo-random, mulberry32 */
+            var a = seed >>> 0;
+            return function () {
+              a |= 0; a = (a + 0x6D2B79F5) | 0;
+              var t = Math.imul(a ^ (a >>> 15), 1 | a);
+              t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+              return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+          }
+
+          (function buildBed() {
+            var rain = document.getElementById("rain");
+            for (var c = 0; c < 14; c++) {
+              var col = el("div", "col", rain);
+              col.style.left = (70 + c * 132) + "px";
+              col.style.backgroundPosition = "0 " + ((c * 97) % 30) + "px";
+              col.style.opacity = String(0.4 + ((c * 37) % 50) / 100);
+            }
+            var gut = document.getElementById("gutter");
+            for (var g = 1; g <= 40; g++) el("div", g === 1 ? "cur" : null, gut, String(g).padStart(2, "0"));
+          })();
+
+          /* group windows are LOCAL seconds (0 = this frame's first instant). The hide
+             lands 20ms early so a sample on a boundary never sees two groups live. */
+          function groups(tl, wins) {
+            wins.forEach(function (w) {
+              tl.set(w[0], { autoAlpha: 1, visibility: "visible" }, w[1]);
+              if (w[2] != null) tl.set(w[0], { autoAlpha: 0, visibility: "hidden" }, w[2] - 0.02);
+            });
+          }
+
+          /* streaming lyric in the bottom-left block: ONE en + ONE zh element, absolute
+             textContent swaps + a clip-path wipe for the type-on feel.
+
+             Three rules here are load-bearing, all learned the hard way from the
+             frame-by-frame sync audit (tools/sync-check.py + tools/vocal-probe.py):
+             1. a line's HIDE may never land after the next line's SHOW. Both writes
+                target the same element, so an overlap silently blanks the next line
+                for its whole window (that is what ate TROIS at 159.657).
+             2. the WHOLE line must be readable by the time the singer starts it, not
+                just its first letter. The wipe used to run up to 0.45 s, so the tail
+                of every caption arrived after the word was already sung — a median
+                +0.33 s (max +0.57 s) on the last character, which at this song's 136
+                BPM is a whole beat late and reads as the subtitles trailing the
+                music. Now LEAD (<=0.18 s) buys the time the wipe (<=0.18 s,
+                front-loaded) spends drawing, so reveal ends at or before the stamp.
+             3. a line may open up to LEAD before its own stamp, but only into the
+                silence its predecessor left — sub-editors place the swap slightly
+                ahead of the entry so the eye is already on the word. */
+          function lyric(tl, cues) {
+            var en = document.getElementById("lyr_en");
+            var zh = document.getElementById("lyr_zh");
+            var meta = document.getElementById("lyr_n");
+            var ticks = document.getElementById("lyr_ticks");
+            var dot = document.getElementById("lyr_dot");
+            var LEAD = 0.18;
+            var PLAIN = { fontSize: "40px", fontFamily: '"Cascadia Mono", Consolas, monospace', color: "#F5F7FF", letterSpacing: "0px", lineHeight: "1.28" };
+            var CAPS = { fontSize: "62px", fontFamily: '"Bahnschrift", "Arial Black", sans-serif', color: "#9F7BFF", letterSpacing: ".02em", lineHeight: "1.1" };
+            cues.forEach(function (q) { el("i", null, ticks, "<b></b>"); });
+            var dots = ticks.querySelectorAll("b");
+            var t0s = cues.map(function (q, i) {
+              var room = i > 0 ? q.t - (cues[i - 1].t + cues[i - 1].dur) : 1;
+              return Math.max(0, L(q.t) - Math.min(LEAD, Math.max(0, room - 0.02)));
+            });
+            cues.forEach(function (q, i) {
+              var t0 = t0s[i];
+              var next = i + 1 < cues.length ? t0s[i + 1] : null;
+              var tHide = Math.min(L(q.t + q.dur), next == null ? Infinity : next);
+              tl.set(en, Object.assign({ textContent: q.en, autoAlpha: 1 }, q.caps ? CAPS : PLAIN), t0);
+              tl.set(zh, { textContent: q.zh, autoAlpha: 1 }, t0);
+              tl.set(meta, { textContent: "LYRIC " + String(i + 1).padStart(2, "0") + "/" + String(cues.length).padStart(2, "0") }, t0);
+              tl.set(dots[i], { visibility: "visible" }, t0);
+              tl.fromTo(en, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: Math.min(0.18, Math.max(0.07, q.dur * 0.12)), ease: "power1.out" }, t0);
+              if (q.caps) tl.fromTo(en, { scale: 1.14 }, { scale: 1, duration: 0.24, ease: "power3.out" }, t0);
+              tl.set(en, { autoAlpha: 0 }, tHide);
+              tl.set(zh, { autoAlpha: 0 }, tHide);
+              if (dot) tl.to(dot, { y: (i / Math.max(1, cues.length - 1)) * 206, duration: 0.4, ease: "power2.inOut" }, t0);
+            });
+          }
+
+          /* status strip telemetry / run-state steps: [[trackT, telemetry, state|null], ...] */
+          function chrome(tl, steps) {
+            steps.forEach(function (s) {
+              if (s[1] != null) tl.set("#sb_tel", { textContent: s[1] }, L(s[0]));
+              if (s[2] != null) tl.set("#sb_state", { textContent: s[2] }, L(s[0]));
+            });
+          }
+          /* animated counter: fmt(value) -> text.
+             The write goes through a property SETTER, not an onUpdate callback:
+             the renderer seeks frame by frame, and gsap seek() suppresses
+             callbacks while still applying values — an onUpdate-driven number
+             would sit at its start value in the finished video. */
+          function count(tl, sel, from, to, at, dur, fmt) {
+            var node = document.querySelector(sel);
+            var cur = from;
+            var o = {};
+            Object.defineProperty(o, "v", {
+              configurable: true,
+              get: function () { return cur; },
+              set: function (x) { cur = x; node.textContent = fmt(x); }
+            });
+            node.textContent = fmt(from);
+            tl.to(o, { v: to, duration: dur, ease: "none" }, L(at));
+          }
+          /* the whiteout: the chrome (rail labels, gutters, status, rain) blanks for the
+             flash and comes back together at backAt. #lyr is deliberately NOT part of it:
+             #flash paints above the lyric block, so hiding the caption would only push its
+             onset off the sung beat (it ate the title cue at 16.0). The line stays scheduled
+             and is simply revealed as the flash fades. */
+          function whiteout(tl, at, backAt) {
+            tl.set(".gutter, .statusbar, #rain, .actlabel", { autoAlpha: 0 }, L(at));
+            tl.to("#flash", { opacity: 1, duration: 0.04, ease: "none" }, L(at));
+            tl.to("#root", { x: 14, duration: 0.05, yoyo: true, repeat: 5, ease: "none" }, L(at));
+            tl.to("#flash", { opacity: 0, duration: 0.45, ease: "power2.out" }, L(at + 0.3));
+            tl.set(".gutter, .statusbar, #rain, .actlabel", { autoAlpha: 1 }, L(backAt));
+          }
+          function capsPunch(tl, sel, at, color) {
+            tl.fromTo(sel, { autoAlpha: 0, scale: 1.25 }, { autoAlpha: 1, scale: 1, duration: 0.22, ease: "power3.out" }, L(at));
+            if (color) tl.set(sel, { color: color }, L(at));
+          }
+          function bedDrift(tl) {
+            tl.to("#rain .col", { y: 1200, duration: SPAN, ease: "none", stagger: { each: 0.35, from: "start" } }, 0);
+          }
+
+          /* ---- graphics helpers ---- */
+          /* stroke draw-on: every [data-draw] path carries pathLength="1" */
+          function drawOn(tl, scope, at, dur, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-draw]");
+            gsap.set(q, { strokeDasharray: 1, strokeDashoffset: 1 });
+            tl.to(q, { strokeDashoffset: 0, duration: dur, ease: "power2.inOut", stagger: staggerEach || 0.08 }, L(at));
+          }
+          /* fill bloom after the line work lands */
+          function bloomIn(tl, scope, at, dur, target) {
+            var q = document.querySelectorAll(scope + " [data-bloom]");
+            gsap.set(q, { autoAlpha: 0 });
+            tl.to(q, { autoAlpha: target == null ? 0.9 : target, duration: dur, ease: "sine.inOut", stagger: 0.06 }, L(at));
+          }
+          /* scale kick on each beat (track seconds in) */
+          function beatKick(tl, sel, beats, scale) {
+            beats.forEach(function (b) {
+              tl.to(sel, { scale: scale == null ? 1.06 : scale, duration: 0.1, yoyo: true, repeat: 1, ease: "power2.out" }, L(b));
+            });
+          }
+          /* opacity flash on each beat */
+          function beatGlow(tl, sel, beats, peak) {
+            beats.forEach(function (b) {
+              tl.to(sel, { opacity: peak == null ? 0.9 : peak, duration: 0.09, yoyo: true, repeat: 1, ease: "sine.out" }, L(b));
+            });
+          }
+          /* drifting particle field inside a host box */
+          function particles(tl, hostSel, n, seed, w, h) {
+            var host = document.querySelector(hostSel);
+            var r = rng(seed);
+            for (var i = 0; i < n; i++) {
+              var p = el("div", "pt", host);
+              var x = r() * w, y = r() * h;
+              p.style.left = x + "px"; p.style.top = y + "px";
+              p.style.opacity = "0";
+              if (i % 4 === 0) p.style.background = "#9F7BFF";
+              if (i % 7 === 0) p.style.background = "#4AA8FF";
+              tl.to(p, { opacity: 0.35 + r() * 0.5, duration: 0.8 + r(), ease: "sine.inOut" }, r() * SPAN * 0.5);
+              tl.to(p, { x: (r() - 0.5) * 220, y: (r() - 0.5) * 180, duration: SPAN, ease: "sine.inOut" }, 0);
+              tl.to(p, { opacity: 0, duration: 1.2, ease: "sine.in" }, SPAN - 1.4 - r());
+            }
+          }
+          /* dancing spectrum bars, period locked to the beat grid */
+          function spectrum(tl, hostSel, n, beatSec, height) {
+            var host = document.querySelector(hostSel);
+            host.style.height = height + "px";
+            for (var i = 0; i < n; i++) {
+              var b = el("i", null, host);
+              var period = beatSec * (1 + (i % 4) * 0.5);
+              var peak = 0.25 + ((i * 37) % 70) / 100;
+              gsap.set(b, { scaleY: 0.12 });
+              tl.to(b, { scaleY: peak, duration: period / 2, ease: "sine.inOut", yoyo: true,
+                repeat: Math.max(1, Math.floor(SPAN / period) * 2 - 1) }, (i % 5) * 0.06);
+            }
+          }
+          /* collapse -> open for [data-ang] parts (fan ribs, dial needles, clock hands):
+             each part's final angle lives in markup; we tween rotation from the closed angle */
+          function spinFrom(tl, scope, at, dur, closed, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-ang]");
+            q.forEach(function (n, i) {
+              var a = parseFloat(n.getAttribute("data-ang"));
+              /* set-then-tween, never fromTo: GSAP resolves svgOrigin against the
+                 element's live matrix, so a fromTo shears each part off on its own */
+              var piv = n.getAttribute("data-piv") || "100 100";
+              gsap.set(n, { rotation: closed - a, svgOrigin: piv });
+              tl.to(n, { rotation: 0, duration: dur, ease: "power3.inOut", svgOrigin: piv },
+                L(at) + i * (staggerEach || 0.035));
+            });
+          }
+          /* the mirror: open -> collapsed. The parts start in their markup pose
+             (rotation 0) and are folded onto the closed angle, one after the other. */
+          function spinTo(tl, scope, at, dur, closed, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-ang]");
+            q.forEach(function (n, i) {
+              var a = parseFloat(n.getAttribute("data-ang"));
+              var piv = n.getAttribute("data-piv") || "100 100";
+              tl.to(n, { rotation: closed - a, duration: dur, ease: "power3.inOut", svgOrigin: piv },
+                L(at) + i * (staggerEach || 0.035));
+            });
+          }
+          /* light up grid cells one by one (.hc heat cells / .kv cells / .tk tokens) */
+          function cellsOn(tl, scope, sel, at, each, peak) {
+            var q = document.querySelectorAll(scope + " " + sel);
+            q.forEach(function (n, i) {
+              tl.to(n, { opacity: peak == null ? 0.85 : peak, duration: 0.12, ease: "power2.out" }, L(at) + i * each);
+            });
+          }
+          /* evict: flash a cell then drop it to empty */
+          function cellsEvict(tl, scope, sel, at, each) {
+            var q = document.querySelectorAll(scope + " " + sel);
+            q.forEach(function (n, i) {
+              tl.to(n, { opacity: 0.95, duration: 0.08, ease: "power2.out" }, L(at) + i * each);
+              tl.to(n, { opacity: 0.06, scaleY: 0.2, duration: 0.3, ease: "power2.in" }, L(at) + i * each + 0.22);
+            });
+          }
+
+          /* ---- continuous behaviour: nothing on this film's stage ever sits still.
+             Every motif gets an entrance AND a loop; the density bar is "pause anywhere
+             and at least two things are moving", which these make structural. ---- */
+          /* heartbeat: breathing scale+glow, repeats until the group is swapped out */
+          function pulse(tl, sel, at, period, scale, reps) {
+            tl.to(sel, { scale: scale == null ? 1.045 : scale, duration: period / 2, ease: "sine.inOut",
+              yoyo: true, repeat: reps == null ? Math.max(1, Math.ceil((SPAN - (at - F)) / period) - 1) : reps }, L(at));
+          }
+          /* hard on/off blink — cursors, status LEDs, warning lamps */
+          function blink(tl, sel, at, period, reps) {
+            var n = reps == null ? Math.max(1, Math.floor((SPAN - (at - F)) / period)) : reps;
+            tl.to(sel, { opacity: 0.08, duration: period / 2, ease: "steps(1)", yoyo: true, repeat: n * 2 - 1 }, L(at));
+          }
+          /* endless rotation about a point (world spin, orbit dot, dial needle).
+             piv: "x y" in svg user units (uses svgOrigin) or any CSS origin like "50% 50%".
+             A 0->360 tween restarts at the same visual angle each repeat, so it is seamless. */
+          function orbit(tl, sel, at, period, turns, piv) {
+            var svg = /^s*[d.]+s+[d.]+s*$/.test(piv || "");
+            var o = svg ? { svgOrigin: piv } : { transformOrigin: piv || "50% 50%" };
+            o.rotation = (turns == null ? 1 : turns) * 360;
+            o.duration = period; o.ease = "none";
+            o.repeat = Math.max(0, Math.ceil((SPAN - (at - F)) / period) - 1);
+            tl.to(sel, o, L(at));
+          }
+          /* a scan line sweeping across a panel, top to bottom, again and again */
+          function sweep(tl, sel, at, period, dist, reps) {
+            tl.fromTo(sel, { y: 0 }, { y: dist, duration: period, ease: "none",
+              repeat: reps == null ? Math.max(1, Math.ceil((SPAN - (at - F)) / period) - 1) : reps }, L(at));
+          }
+          /* a charge running along a wire: dot travels the given dx/dy, then resets */
+          function travel(tl, sel, at, dur, dx, dy, reps) {
+            tl.fromTo(sel, { x: 0, y: 0, opacity: 0 },
+              { x: dx, y: dy, opacity: 1, duration: dur, ease: "power1.inOut" }, L(at));
+            tl.to(sel, { opacity: 0, duration: dur * 0.35, ease: "power1.in" }, L(at) + dur * 0.8);
+            if (reps > 1) {
+              tl.fromTo(sel, { x: 0, y: 0, opacity: 0 },
+                { x: dx, y: dy, opacity: 1, duration: dur, ease: "power1.inOut", repeat: reps - 1 }, L(at) + dur * 1.2);
+            }
+          }
+          /* slow wander so a whole assembly never looks parked */
+          function drift(tl, sel, at, dx, dy, period) {
+            tl.to(sel, { x: dx, y: dy, duration: period / 2, ease: "sine.inOut", yoyo: true,
+              repeat: Math.max(1, Math.ceil((SPAN - (at - F)) / period) * 2 - 1) }, L(at));
+          }
+
+          /* ---- MECHANISMS. A lyric is an ACTION, so a motif may not merely arrive:
+             it has to change STATE. Every helper below leaves the part in its new
+             position for the rest of the act, and every one is a plain property
+             tween, which is what makes it survive the renderer's frame-by-frame seek.
+             Set the BEFORE state with gsap.set at build time, tween to AFTER. ---- */
+          /* throw a lever / blade / breaker about an exact svg user-space pivot */
+          function lever(tl, sel, at, from, to, piv, dur, ease) {
+            gsap.set(sel, { rotation: from, svgOrigin: piv });
+            tl.to(sel, { rotation: to, duration: dur == null ? 0.3 : dur,
+              ease: ease || "back.out(2.2)" }, L(at));
+          }
+          /* two halves slide shut from either side (shield closing, brackets meeting) */
+          function clamp(tl, selA, selB, at, dx, dur) {
+            gsap.set(selA, { x: -dx }); gsap.set(selB, { x: dx });
+            tl.to(selA, { x: 0, duration: dur || 0.42, ease: "power3.inOut" }, L(at));
+            tl.to(selB, { x: 0, duration: dur || 0.42, ease: "power3.inOut" }, L(at));
+          }
+          /* push a part home into a slot: it starts offset by dx/dy and clicks in */
+          function insert(tl, sel, at, dx, dy, dur) {
+            gsap.set(sel, { x: dx, y: dy });
+            tl.to(sel, { x: 0, y: 0, duration: dur || 0.45, ease: "power2.out" }, L(at));
+          }
+          /* a piece falls from h px above, lands, squashes and settles */
+          function drop(tl, sel, at, h, land) {
+            var t = L(at), f = land || 0.42;
+            gsap.set(sel, { y: -h });
+            tl.to(sel, { y: 0, duration: f, ease: "bounce.out" }, t);
+            tl.to(sel, { scaleX: 1.12, scaleY: 0.86, duration: 0.06, ease: "power1.out",
+              transformOrigin: "50% 100%" }, t + f);
+            tl.to(sel, { scaleX: 1, scaleY: 1, duration: 0.24, ease: "power2.out" }, t + f + 0.07);
+          }
+          /* press a button: sink, hold, spring back */
+          function press(tl, sel, at, piv, depth) {
+            var svg = /^s*[d.]+s+[d.]+s*$/.test(piv || "");
+            var o = svg ? { svgOrigin: piv } : { transformOrigin: piv || "50% 50%" };
+            var d = depth == null ? 0.84 : depth;
+            tl.to(sel, Object.assign({ scale: d, duration: 0.1, ease: "power2.in" }, o), L(at));
+            tl.to(sel, Object.assign({ scale: 1, duration: 0.36, ease: "back.out(3)" }, o), L(at) + 0.11);
+          }
+          /* slam a seal down from above; it lands and stays landed */
+          function stamp(tl, sel, at, fromY, rot) {
+            gsap.set(sel, { y: -(fromY || 150), rotation: rot == null ? -14 : rot, scale: 1.3, autoAlpha: 0 });
+            tl.set(sel, { autoAlpha: 1 }, L(at));
+            tl.to(sel, { y: 0, rotation: 0, scale: 1, duration: 0.24, ease: "power3.in" }, L(at));
+          }
+          /* iris opening: every matched blade starts stacked at the centre and flies
+             outward to its own angle, which is what "the aperture opened" looks like */
+          function aperture(tl, sel, at, dist, dur) {
+            var q = document.querySelectorAll(sel);
+            Array.prototype.forEach.call(q, function (n, i) {
+              var a = (i / q.length) * Math.PI * 2;
+              gsap.set(n, { x: 0, y: 0 });
+              tl.to(n, { x: Math.sin(a) * dist, y: -Math.cos(a) * dist,
+                duration: dur || 0.55, ease: "power2.inOut" }, L(at));
+            });
+          }
+          /* type a line of stage text: a mask slides off it left-to-right while a
+             cursor runs ahead. Callback-rewritten text is dead under seek, so the
+             reveal is geometric. */
+          function typeIn(tl, sel, at, dur, cursorSel, w) {
+            gsap.set(sel, { clipPath: "inset(0 100% 0 0)", autoAlpha: 1 });
+            tl.to(sel, { clipPath: "inset(0 0% 0 0)", duration: dur, ease: "none" }, L(at));
+            if (cursorSel) {
+              gsap.set(cursorSel, { autoAlpha: 0 });
+              tl.set(cursorSel, { autoAlpha: 1 }, L(at));
+              tl.to(cursorSel, { x: w == null ? 0 : w, duration: dur, ease: "none" }, L(at));
+              tl.set(cursorSel, { autoAlpha: 0 }, L(at) + dur + 0.2);
+            }
+          }
+          /* wire up: a stroke goes from dead to live, and stays live */
+          function energize(tl, sel, at, to, dur) {
+            tl.to(sel, { stroke: to, duration: dur || 0.25, ease: "none" }, L(at));
+          }
+          /* same for a filled part: an LED, a cell, a gauge puck */
+          function energizeFill(tl, sel, at, to, dur) {
+            tl.to(sel, { fill: to, duration: dur || 0.2, ease: "none" }, L(at));
+          }
+          /* a level filling up (or draining) along x: geometric, so it survives seek */
+          function fillX(tl, sel, at, dur, hideFrom, hideTo) {
+            var a = hideFrom == null ? 100 : hideFrom, b = hideTo == null ? 0 : hideTo;
+            gsap.set(sel, { clipPath: "inset(0 " + a + "% 0 0)" });
+            tl.to(sel, { clipPath: "inset(0 " + b + "% 0 0)", duration: dur, ease: "none" }, L(at));
+          }
+          /* and along y, filling from the floor of the box up */
+          function fillY(tl, sel, at, dur, hideFrom, hideTo) {
+            var a = hideFrom == null ? 100 : hideFrom, b = hideTo == null ? 0 : hideTo;
+            gsap.set(sel, { clipPath: "inset(" + a + "% 0 0 0)" });
+            tl.to(sel, { clipPath: "inset(" + b + "% 0 0 0)", duration: dur, ease: "none" }, L(at));
+          }
+          /* erase: a whole part is wiped away and gone for the rest of the act */
+          function erase(tl, sel, at, dur, dir) {
+            var open = { x: "inset(0 0% 0 0)", y: "inset(0 0 0 0)" }[dir || "x"];
+            var shut = { x: "inset(0 0% 0 100%)", y: "inset(100% 0 0 0)" }[dir || "x"];
+            gsap.set(sel, { clipPath: open });
+            tl.to(sel, { clipPath: shut, duration: dur || 0.5, ease: "power2.inOut" }, L(at));
+          }
+          /* damped shake — an impact, a rejected write */
+          function shake(tl, sel, at, amp, dur) {
+            var a = amp == null ? 9 : amp, step = (dur == null ? 0.5 : dur) / 6;
+            [a, -a * 0.72, a * 0.5, -a * 0.32, a * 0.16, 0].forEach(function (x, i) {
+              tl.to(sel, { x: x, duration: step, ease: "power1.out" }, L(at) + i * step);
+            });
+          }
+          /* one-frame slam of the whole camera on a hard accent */
+          function jerk(tl, at, dx) {
+            tl.to("#root", { x: dx == null ? 11 : dx, duration: 0.045, yoyo: true, repeat: 3, ease: "none" }, L(at));
+          }
+          /* a short full-frame flash that keeps the chrome (the climax's hard cuts) */
+          function slash(tl, at, peak) {
+            tl.to("#flash", { opacity: peak == null ? 0.8 : peak, duration: 0.035, ease: "none" }, L(at));
+            tl.to("#flash", { opacity: 0, duration: 0.1, ease: "power2.out" }, L(at) + 0.04);
+          }
+          /* a ring shockwave that leaves nothing behind: the visible proof something HIT */
+          function pop(tl, sel, at, scale, dur) {
+            gsap.set(sel, { autoAlpha: 0 });
+            tl.set(sel, { autoAlpha: 1, scale: 0.22, opacity: 1 }, L(at));
+            tl.to(sel, { scale: scale == null ? 1.6 : scale, opacity: 0,
+              duration: dur || 0.7, ease: "power2.out" }, L(at));
+          }
+          /* mechanical index step: a hand / carriage jumping in equal clicks */
+          function tickTo(tl, sel, at, angle, steps, dur, piv) {
+            var svg = /^[d. ]+$/.test(piv || "");
+            var o = { rotation: angle, duration: dur || 0.42,
+              ease: "steps(" + (steps == null ? 6 : steps) + ")",
+              svgOrigin: svg ? piv : null, transformOrigin: svg ? null : (piv || "50% 50%") };
+            if (!svg) delete o.svgOrigin; else delete o.transformOrigin;
+            tl.to(sel, o, L(at));
+          }
+          /* A dial needle that really turns. These motifs are emitted inside a scaling
+             <g>, and GSAP's svgOrigin mis-resolves through it (the hand lands half the
+             frame away), so the tip is swept by tweening its ATTRIBUTES instead.
+             lineSel targets the needle <line>; dotSel, if given, its tip <circle>. */
+          function needleTick(tl, lineSel, dotSel, at, angle, steps, dur, px, py, r) {
+            var n = steps == null ? 6 : steps, d = (dur == null ? 0.42 : dur) / n;
+            for (var k = 1; k <= n; k++) {
+              var a = (angle * k / n) * Math.PI / 180;
+              var x = +(px + r * Math.sin(a)).toFixed(1);
+              var y = +(py - r * Math.cos(a)).toFixed(1);
+              tl.to(lineSel, { attr: { x2: x, y2: y }, duration: d, ease: "none" }, L(at) + (k - 1) * d);
+              if (dotSel) tl.to(dotSel, { attr: { cx: x, cy: y }, duration: d, ease: "none" }, L(at) + (k - 1) * d);
+            }
+          }
+          /* a row being thrown out of the rack: lift, fly, disappear */
+          function eject(tl, sel, at, dx, dy, dur) {
+            var t = L(at), f = dur || 0.55;
+            tl.to(sel, { x: dx, y: dy, opacity: 0.15, scale: 0.9, duration: f,
+              ease: "power2.in" }, t);
+            tl.set(sel, { autoAlpha: 0 }, t + f);
+          }
+          /* an part arriving with real weight: overshoot, then settle */
+          function settle(tl, sel, at, fromScale, dur) {
+            gsap.set(sel, { scale: fromScale == null ? 1.35 : fromScale });
+            tl.to(sel, { scale: 1, duration: dur || 0.45, ease: "back.out(2.4)" }, L(at));
+          }
+
+          var tl = gsap.timeline({ paused: true });
+          bedDrift(tl);
+          var CUES = [{"i":24,"t":44.452,"end":45.85,"dur":1.398,"en":"Switch my current","zh":"切换我的电流","caps":false,"frame":"f04-current","held":false,"pulled":false},{"i":25,"t":45.85,"end":47.672,"dur":1.822,"en":"To AC to DC","zh":"从交流到直流","caps":false,"frame":"f04-current","held":false,"pulled":false},{"i":26,"t":47.672,"end":49.534,"dur":1.862,"en":"And then blind my vision","zh":"然后蒙上我的眼睛","caps":false,"frame":"f04-current","held":false,"pulled":false},{"i":27,"t":49.534,"end":51.363,"dur":1.829,"en":"So dizzy so dizzy","zh":"头晕目眩","caps":false,"frame":"f04-current","held":false,"pulled":false},{"i":28,"t":51.363,"end":53.225,"dur":1.862,"en":"Oh we can travel","zh":"我们可以穿越时空","caps":false,"frame":"f04-current","held":false,"pulled":false},{"i":29,"t":53.225,"end":55.083,"dur":1.858,"en":"To A.D to B.C","zh":"从未来到过去","caps":false,"frame":"f04-current","held":false,"pulled":false},{"i":30,"t":55.083,"end":56.916,"dur":1.833,"en":"And we can unite","zh":"然后成为一体","caps":false,"frame":"f04-current","held":false,"pulled":false},{"i":31,"t":56.916,"end":59.257,"dur":2.341,"en":"So deeply so deeply","zh":"深深入髓","caps":false,"frame":"f04-current","held":false,"pulled":false}];
+
+          groups(tl, [["#g1", 0, 7.361], ["#g2", 7.361, null]]);
+          lyric(tl, CUES);
+          particles(tl, "#g0_pts", 28, 13, 1728, 690);
+
+          /* ---- she carries the charge the whole act ---- */
+          tl.to("#g0_sil .silimg", { opacity: 1, duration: 1.0, ease: "sine.inOut" }, L(44.2));
+          drawOn(tl, "#g0_halos", 44.6, 1.6, 0.12);
+          tl.to("#g0_sil, #g0_halos", { y: -14, duration: 3.2, ease: "sine.inOut", yoyo: true, repeat: 4 }, L(44.6));
+          beatKick(tl, "#g0_sil, #g0_halos", [44.466], 1.04);
+          beatKick(tl, "#g0_sil, #g0_halos", [46.254], 1.04);
+          beatKick(tl, "#g0_sil, #g0_halos", [48.135], 1.04);
+          beatKick(tl, "#g0_sil, #g0_halos", [49.830], 1.04);
+          beatKick(tl, "#g0_sil, #g0_halos", [51.618], 1.04);
+          beatKick(tl, "#g0_sil, #g0_halos", [53.406], 1.04);
+          tl.fromTo("#g0_amp", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3 }, L(44.4));
+
+          /* ============================================================ g1 */
+          tl.fromTo("#g1_c1, #g1_sw, #g1_c2, #g1_cur, #g1_c3", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4, stagger: 0.08 }, L(44.2));
+          drawOn(tl, "#g1_brk", 44.15, 0.7, 0.06);
+
+          /* 44.452 "Switch my current" — the breaker is THROWN, then the wire lives */
+          drawOn(tl, "#g1_ac", 44.3, 0.8, 0.05);
+          tl.fromTo("#g1_sel", { opacity: 0 }, { opacity: 1, duration: 0.35 }, L(44.2));
+          lever(tl, "#g1_brk .lever", 44.5, -52, 0, "58 102", 0.34, "back.out(2.8)");
+          energize(tl, "#g1_brk [data-draw]", 44.72, "#22D3EE", 0.3);
+          energizeFill(tl, "#g1_brk .win", 44.72, "#22D3EE", 0.2);
+          tl.to("#g1_brk", { scale: 1.14, duration: 0.12, yoyo: true, repeat: 1, ease: "power2.out" }, L(44.72));
+          tl.set("#g1_sw", { textContent: "SW: CLOSED", color: "#22D3EE" }, L(44.72));
+          shake(tl, "#g1_brk", 44.72, 6, 0.4);
+          /* current starts down the rail (left bulbs wake) */
+          tl.to("#g0_rail .fill", { clipPath: "inset(0 82% 0 0)", duration: 0.6, ease: "power2.out" }, L(44.75));
+          energize(tl, "#g0_rail .live", 44.75, "#22D3EE", 0.5);
+          tl.to("#g0_rail .bulb[data-i='0']", { opacity: 1, attr: { fill: "#22D3EE" }, duration: 0.25 }, L(44.95));
+          tl.to("#g0_rail .bulb[data-i='1']", { opacity: 1, attr: { fill: "#22D3EE" }, duration: 0.25 }, L(45.11));
+          count(tl, "#g0_amp", 0, 3.2, 44.72, 1.4, function (v) { return "I = " + v.toFixed(1) + " A"; });
+
+          /* 45.850 "To AC to DC" — the selector flips; the sine flattens to a line */
+          lever(tl, "#g1_sel .lever", 45.9, 0, 116, "24 60", 0.3, "back.out(2.4)");
+          tl.to("#g1_ac", { scaleY: 0.04, opacity: 0.25, duration: 0.4, ease: "power2.inOut" }, L(46.0));
+          drawOn(tl, "#g1_dc", 46.05, 0.55, 0.01);
+          energize(tl, "#g1_dc .live", 46.5, "#22D3EE", 0.3);
+          tl.set("#g1_cur", { textContent: "current: DC", color: "#9F7BFF" }, L(46.1));
+          pulse(tl, "#g1_dc", 48.135, 0.8, 1.03, 2);
+          pulse(tl, "#g1_dc", 49.830, 0.8, 1.03, 2);
+          pulse(tl, "#g1_dc", 51.618, 0.8, 1.03, 2);
+
+          /* 47.672 "blind my vision" — the two lids SLAM shut over the iris */
+          gsap.set("#g1_eye .lidU", { y: -80 });
+          gsap.set("#g1_eye .lidD", { y: 80 });
+          drawOn(tl, "#g1_eye", 46.9, 0.7, 0.05); bloomIn(tl, "#g1_eye", 47.2, 0.3, 0.9);
+          tl.to("#g1_eye .lidU", { y: 6, duration: 0.3, ease: "power3.in" }, L(47.7));
+          tl.to("#g1_eye .lidD", { y: -6, duration: 0.3, ease: "power3.in" }, L(47.7));
+          energize(tl, "#g1_eye [data-draw]", 48.0, "#8A93B8", 0.3);
+          tl.to("#g1_eye", { scale: 1.1, duration: 0.1, yoyo: true, repeat: 1, ease: "power2.out" }, L(48.0));
+
+          /* 49.534 "So dizzy" — a spiral spins up inside the shut eye + shake */
+          drawOn(tl, "#g1_spiral", 49.55, 1.4, 0.02);
+          orbit(tl, "#g1_spiral", 49.9, 2.4, 1, "110 110");
+          shake(tl, "#g1_spiral", 49.830, 5, 0.3);
+          shake(tl, "#g1_spiral", 50.248, 5, 0.3);
+          shake(tl, "#g1_spiral", 50.689, 5, 0.3);
+          shake(tl, "#g1_spiral", 51.154, 5, 0.3);
+          tl.to("#g1_spiral", { opacity: 0.7, duration: 0.5, ease: "sine.inOut", yoyo: true, repeat: 2 }, L(50.0));
+
+          /* ============================================================ g2 */
+          tl.fromTo("#g2_c1, #g2_c2, #g2_c3, #g2_pos, #g2_link", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4, stagger: 0.06 }, L(51.5));
+
+          /* 51.363 "Oh we can travel" — a charge runs the whole rail, waking bulbs */
+          travel(tl, "#g0_spark", 51.42, 1.6, 1220, 0, 1);
+          tl.to("#g0_rail .fill", { clipPath: "inset(0 0% 0 0)", duration: 1.6, ease: "power1.inOut" }, L(51.42));
+          tl.to("#g0_rail .bulb[data-i='2']", { opacity: 1, attr: { fill: "#22D3EE" }, duration: 0.22 }, L(51.60));
+          tl.to("#g0_rail .bulb[data-i='3']", { opacity: 1, attr: { fill: "#22D3EE" }, duration: 0.22 }, L(51.86));
+          tl.to("#g0_rail .bulb[data-i='4']", { opacity: 1, attr: { fill: "#22D3EE" }, duration: 0.22 }, L(52.12));
+          tl.to("#g0_rail .bulb[data-i='5']", { opacity: 1, attr: { fill: "#22D3EE" }, duration: 0.22 }, L(52.38));
+          tl.to("#g0_rail .bulb[data-i='6']", { opacity: 1, attr: { fill: "#22D3EE" }, duration: 0.22 }, L(52.64));
+          count(tl, "#g0_amp", 3.2, 6.4, 51.42, 1.7, function (v) { return "I = " + v.toFixed(1) + " A"; });
+
+          /* 53.225 "To A.D to B.C" — needle runs BACKWARDS, position_ids counts down */
+          drawOn(tl, "#g2_dial", 51.7, 0.8, 0.05);
+          orbit(tl, "#g2_dial .needle", 53.3, 3.4, -2, "50% 100%");
+          count(tl, "#g2_pos", 8192, 0, 53.3, 3.3, function (v) { return "pos_id " + Math.round(v); });
+          beatKick(tl, "#g2_dial", [53.406], 1.05);
+          beatKick(tl, "#g2_dial", [53.870], 1.05);
+          beatKick(tl, "#g2_dial", [54.311], 1.05);
+
+          /* 55.083 "And we can unite" — the plug is INSERTED home, circuit closes */
+          drawOn(tl, "#g2_sock", 54.4, 0.7, 0.05);
+          drawOn(tl, "#g2_plug", 54.5, 0.7, 0.05);
+          insert(tl, "#g2_plug", 55.14, -150, 0, 0.5);
+          tl.to("#g2_plug", { scale: 0.96, duration: 0.08, ease: "power2.in" }, L(55.6));
+          tl.to("#g2_plug", { scale: 1, duration: 0.26, ease: "back.out(3)" }, L(55.68));
+          energizeFill(tl, "#g2_sock .slotglow", 55.6, "#22D3EE", 0.3);
+          shake(tl, "#g2_sock", 55.62, 7, 0.4);
+          tl.to("#g2_sock", { scale: 1.12, duration: 0.12, yoyo: true, repeat: 1, ease: "power2.out" }, L(55.62));
+          tl.set("#g2_link", { textContent: "link: CLOSED", color: "#22D3EE" }, L(55.62));
+          /* she is tied into the circuit */
+          energize(tl, "#g0_halos", 55.62, "#22D3EE", 0.4);
+          beatKick(tl, "#g0_sil, #g0_halos", [55.62], 1.08);
+
+          /* 56.916 "So deeply" — the bulb IGNITES and the rail fills to full */
+          drawOn(tl, "#g2_bulb", 55.9, 0.8, 0.05);
+          press(tl, "#g2_bulb", 56.95, "50% 90%", 0.9);
+          energize(tl, "#g2_bulb .filament", 57.0, "#22D3EE", 0.35);
+          energize(tl, "#g2_bulb .halo", 57.05, "#9F7BFF", 0.3);
+          pop(tl, "#g2_pop", 57.05, 1.8, 0.8);
+          jerk(tl, 57.06, 10);
+          pulse(tl, "#g2_bulb .filament", 57.3, 1.0, 1.12, 6);
+          tl.to("#g0_rail .bulb[data-i='0']", { attr: { r: 13 }, duration: 0.2, yoyo: true, repeat: 1 }, L(56.98));
+          tl.to("#g0_rail .bulb[data-i='1']", { attr: { r: 13 }, duration: 0.2, yoyo: true, repeat: 1 }, L(57.03));
+          tl.to("#g0_rail .bulb[data-i='2']", { attr: { r: 13 }, duration: 0.2, yoyo: true, repeat: 1 }, L(57.08));
+          tl.to("#g0_rail .bulb[data-i='3']", { attr: { r: 13 }, duration: 0.2, yoyo: true, repeat: 1 }, L(57.13));
+          tl.to("#g0_rail .bulb[data-i='4']", { attr: { r: 13 }, duration: 0.2, yoyo: true, repeat: 1 }, L(57.18));
+          tl.to("#g0_rail .bulb[data-i='5']", { attr: { r: 13 }, duration: 0.2, yoyo: true, repeat: 1 }, L(57.23));
+          tl.to("#g0_rail .bulb[data-i='6']", { attr: { r: 13 }, duration: 0.2, yoyo: true, repeat: 1 }, L(57.28));
+          count(tl, "#g0_amp", 6.4, 9.8, 56.95, 2.0, function (v) { return "I = " + v.toFixed(1) + " A"; });
+
+          chrome(tl, [
+            [44.002, "ctx 1,024/32,768 · tok/s 42.4 · t=0.70", "▶ mains OFF"],
+            [44.72, "ctx 1,024/32,768 · tok/s 42.4 · t=0.70", "▶ mains ON · 240V"],
+            [46.0, "ctx 1,152/32,768 · tok/s 44.0 · t=0.70", "▶ AC → DC"],
+            [47.7, "ctx 1,152/32,768 · tok/s 44.0 · t=0.70", "▶ dropout 0.5"],
+            [51.42, "ctx 1,408/32,768 · tok/s 46.2 · t=0.70", "▶ travelling"],
+            [53.3, "ctx 1,408/32,768 · tok/s 46.2 · t=0.70", "◀ rewinding"],
+            [55.62, "ctx 1,664/32,768 · tok/s 48.0 · t=0.70", "▶ circuit closed"],
+            [57.05, "ctx 1,664/32,768 · tok/s 48.0 · t=0.70", "▶ fully energised"],
+          ]);
+  
+          window.__timelines = window.__timelines || {};
+          window.__timelines["04-f04-current"] = tl;
+          tl.seek(0);
+        })();
+      </script>
+    </template>
+  </body>
+</html>

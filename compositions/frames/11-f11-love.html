@@ -1,0 +1,945 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        @font-face { font-family: "Bahnschrift"; src: local("Bahnschrift"), local("Bahnschrift Regular"); font-weight: 100 700; }
+        @font-face { font-family: "Cascadia Mono"; src: local("Cascadia Mono"), local("CascadiaMono-Regular"); font-weight: 100 700; }
+        @font-face { font-family: "Microsoft YaHei"; src: local("Microsoft YaHei"), local("Microsoft YaHei UI"); font-weight: 100 700; }
+
+        #root { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden;
+          background: #06070C; color: #F5F7FF; font-family: "Cascadia Mono", Consolas, monospace; }
+        #root * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        /* Opt-in "grow this SVG part in place": tween --pop, not scale.
+           GSAP builds an SVG element's matrix by MEASURING its transform origin, and that
+           measurement is unreliable here — the tween ends with a translate baked into the
+           element (act 03's tangent line finished 64 px from the dot it touches). Handing
+           the scale to CSS makes the browser resolve transform-box:fill-box exactly, so the
+           part grows where it was authored. tools/audit-svg-transforms.mjs watches for it. */
+        svg .grow { transform-box: fill-box; transform-origin: 50% 50%; transform: scale(var(--pop, 1)); }
+
+        /* ---- bed layers (decorative, ignored by the layout audit) ---- */
+        .rain { position: absolute; inset: 0; opacity: .42; overflow: hidden; }
+        .rain .col { position: absolute; top: -1200px; width: 2px; height: 1200px;
+          background: repeating-linear-gradient(180deg, rgba(34,211,238,.5) 0 9px, transparent 9px 30px); }
+        .glow { position: absolute; inset: 0; opacity: .55; }
+        .gridfloor { position: absolute; left: 0; right: 0; bottom: 58px; height: 300px; opacity: .14;
+          background:
+            repeating-linear-gradient(90deg, rgba(97,92,237,.7) 0 1px, transparent 1px 96px),
+            repeating-linear-gradient(0deg, rgba(97,92,237,.55) 0 1px, transparent 1px 44px);
+          transform: perspective(700px) rotateX(58deg); transform-origin: 50% 100%; }
+        .scan { position: absolute; inset: 0; pointer-events: none; opacity: .05;
+          background: repeating-linear-gradient(0deg, #F5F7FF 0 1px, transparent 1px 4px); }
+        .vig { position: absolute; inset: 0; pointer-events: none;
+          background: radial-gradient(120% 90% at 50% 46%, transparent 55%, rgba(3,4,8,.85) 100%); }
+
+        .gutter { position: absolute; left: 0; top: 0; bottom: 58px; width: 62px;
+          border-right: 1px solid #1E2540; padding: 14px 8px 0 0; text-align: right;
+          font-size:16px; line-height: 24px; color: #8A93B8; overflow: hidden; }
+        .gutter .cur { color: #9F7BFF; }
+        .statusbar { position: absolute; left: 0; right: 0; bottom: 0; height: 58px;
+          background: #0B0D16; border-top: 1px solid #1E2540; display: flex; align-items: center;
+          justify-content: space-between; padding: 0 26px; font-size:20px; letter-spacing: .06em; color: #8A93B8; }
+        .statusbar .l { color: #F5F7FF; } .statusbar .l b { color: #9F7BFF; font-weight: 600; }
+        .statusbar .r { color: #4AA8FF; }
+
+        .actlabel { position: absolute; right: 64px; top: 34px; text-align: right; }
+        .actlabel .a { font-size:20px; letter-spacing: .22em; color: #8A93B8; }
+        .actlabel .t { margin-top: 6px; font-size:16px; letter-spacing: .12em; color: #8A93B8; }
+
+        /* ---- graphics stage: every motif is placed inside this box ---- */
+        .stage { position: absolute; left: 96px; top: 88px; width: 1728px; height: 690px; }
+        .group { position: absolute; inset: 0; visibility: hidden; }
+        /* whole-act furniture. It must NOT carry its own visibility: the runtime
+           hides an off-window sub-composition with visibility on its host, and an
+           inline visibility:visible here would inherit straight through that and
+           bleed the act's furniture over every later act. */
+        .stay { position: absolute; inset: 0; }
+        .flash { position: absolute; inset: 0; background: #F5F7FF; opacity: 0; pointer-events: none; }
+
+        .motif { position: absolute; }
+        /* the shared HUD corner frame: every act frames its graphics with the same
+           four brackets, which is what makes different motifs read as one system. */
+        .hud { position: absolute; inset: -22px; pointer-events: none; }
+        .hud i { position: absolute; width: 26px; height: 26px; border: 2px solid rgba(138,147,184,.45); }
+        .hud i:nth-child(1) { left: 0; top: 0; border-right: 0; border-bottom: 0; }
+        .hud i:nth-child(2) { right: 0; top: 0; border-left: 0; border-bottom: 0; }
+        .hud i:nth-child(3) { left: 0; bottom: 0; border-right: 0; border-top: 0; }
+        .hud i:nth-child(4) { right: 0; bottom: 0; border-left: 0; border-top: 0; }
+        .motif svg { display: block; overflow: visible; }
+        .motif [data-draw] { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .gq1 { filter: drop-shadow(0 0 7px rgba(97,92,237,.75)); }
+        .gq2 { filter: drop-shadow(0 0 8px rgba(159,123,255,.7)); }
+        .gq3 { filter: drop-shadow(0 0 7px rgba(74,168,255,.7)); }
+        .gda { filter: drop-shadow(0 0 7px rgba(34,211,238,.65)); }
+        .gmg { filter: drop-shadow(0 0 9px rgba(255,46,136,.7)); }
+        .gam { filter: drop-shadow(0 0 8px rgba(255,180,84,.65)); }
+        .gok { filter: drop-shadow(0 0 7px rgba(74,222,128,.6)); }
+
+        .pt { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: #22D3EE; }
+        .spec { position: absolute; display: flex; align-items: flex-end; gap: 5px; }
+        .spec i { display: block; width: 7px; height: 100%; transform-origin: 50% 100%;
+          background: linear-gradient(180deg, #22D3EE, rgba(97,92,237,.25)); }
+
+        /* ---- lyric block: bottom-left, left-anchored ---- */
+        .lyr { position: absolute; left: 96px; top: 796px; width: 1180px; height: 214px; }
+        .lyr .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+          background: linear-gradient(180deg, #615CED, #9F7BFF 55%, rgba(159,123,255,.15)); }
+        .lyr .bar i { position: absolute; left: -3px; width: 8px; height: 8px; border-radius: 50%;
+          background: #9F7BFF; box-shadow: 0 0 10px #9F7BFF; }
+        .lyr .meta { position: absolute; left: 28px; top: -34px; display: flex; align-items: center; gap: 14px; }
+        .lyr .meta .n { font-size:16px; letter-spacing: .18em; color: #8A93B8; }
+        .lyr .meta .ticks { display: flex; gap: 6px; }
+        .lyr .meta .ticks i { width: 14px; height: 3px; background: #1E2540; }
+        .lyr .meta .ticks i b { display: block; width: 100%; height: 100%; background: #9F7BFF; visibility: hidden; }
+        /* transform-origin at the left edge: a caps cue scales UP from the anchor,
+           never off the left of the screen (the old centred origin pushed 62px text out). */
+        .lyr .en { position: absolute; left: 28px; right: 0; top: 24px; transform-origin: 0 50%;
+          text-align: left; font-size: 40px; font-weight: 600; line-height: 1.28; color: #F5F7FF; }
+        .lyr .en.caps { font-family: "Bahnschrift", "Arial Black", sans-serif; font-size: 62px;
+          letter-spacing: .02em; line-height: 1.1; color: #9F7BFF; }
+        .lyr .zh { position: absolute; left: 28px; right: 0; top: 164px;
+          font-family: "Microsoft YaHei", sans-serif; font-size: 26px; line-height: 1.5; color: #8A93B8; }
+
+        .caps { font-family: "Bahnschrift", "Arial Black", sans-serif; font-weight: 700; letter-spacing: .01em; }
+        .panel { border: 1px solid #1E2540; background: #0B0D16; }
+        .dim { color: #8A93B8; } .cy { color: #22D3EE; } .vi { color: #9F7BFF; } .bl { color: #4AA8FF; }
+        .am { color: #FFB454; } .mg { color: #FF2E88; } .ok { color: #4ADE80; }
+#g0_sil .silimg { opacity: 1 !important; }
+            #g1_wall { position:absolute; display:flex; align-items:flex-end; gap:3px; }
+            #g1_wall i { flex:1; height:6%; border-radius:2px 2px 0 0;
+              background:linear-gradient(180deg,#FF2E88,rgba(97,92,237,.25));
+              box-shadow:0 0 9px rgba(255,46,136,.35); }
+            #g1_wall i.arg { background:linear-gradient(180deg,#22D3EE,#615CED);
+              box-shadow:0 0 22px #22D3EE; }
+#g2_bub { position:absolute; left:150px; top:250px; width:420px; padding:22px 26px;
+              border:1px solid rgba(74,168,255,.5); background:rgba(74,168,255,.08);
+              font-size:22px; color:#F5F7FF; border-radius:8px; }
+            #g2_bub .u { color:#4AA8FF; font-size:19px; letter-spacing:.16em; margin-bottom:10px; }
+            .edge { position:absolute; background:#FF2E88; box-shadow:0 0 18px #FF2E88; }
+#g3_tor { position:absolute; left:120px; top:90px; width:560px; height:520px; overflow:hidden;
+              -webkit-mask-image:linear-gradient(180deg,transparent,#000 14%,#000 86%,transparent); }
+            #g3_tor .ln { font-size:21px; line-height:34px; color:#9F7BFF; white-space:nowrap; opacity:0; }
+            #g3_tor .ln.b { color:#22D3EE; } #g3_tor .ln.m { color:#FF2E88; }
+            .qa { position:absolute; left:760px; width:360px; }
+            .qa .lab { font-size:19px; color:#8A93B8; letter-spacing:.1em; }
+            .qa .tr { position:absolute; right:0; top:2px; width:150px; height:8px; border-radius:4px; background:#1E2540; }
+            .qa .fi { position:absolute; left:0; top:2px; width:150px; height:8px; border-radius:4px; background:linear-gradient(90deg,#4AA8FF,#22D3EE); }
+            .qa .pc { position:absolute; right:-64px; top:-4px; font-size:21px; color:#22D3EE; }
+#g4_eq { position:absolute; left:150px; top:150px; font-size:46px; color:#F5F7FF;
+              font-family:"Cascadia Mono",Consolas,monospace; white-space:nowrap; }
+            #g4_eq b { color:#FF2E88; } #g4_eq i { color:#22D3EE; font-style:normal; }
+            .anno { position:absolute; font-size:26px; letter-spacing:.06em; opacity:0; }
+#g5_desk { position:absolute; left:120px; top:150px; width:600px; height:400px;
+              border:1px solid #1E2540; background:#0B0D16; border-radius:10px; }
+            #g5_desk .bar { height:38px; border-bottom:1px solid #1E2540; display:flex; align-items:center; gap:8px; padding:0 16px; }
+            #g5_desk .bar i { width:11px; height:11px; border-radius:50%; background:#1E2540; }
+            #g5_desk .bar span { font-size:19px; color:#8A93B8; margin-left:8px; }
+            #g5_desk .body { position:absolute; left:0; right:0; top:38px; bottom:0; }
+            #g5_cur { position:absolute; left:360px; top:330px; width:0; height:0; transform:rotate(-135deg);
+              border-left:14px solid #F5F7FF; border-top:9px solid transparent; border-bottom:9px solid transparent;
+              filter:drop-shadow(0 0 6px #F5F7FF); }
+            #g5_cell { position:absolute; left:1150px; top:26px; width:520px; height:660px;
+              border:2px solid #FF2E88; box-shadow:0 0 26px rgba(255,46,136,.5), inset 0 0 30px rgba(255,46,136,.14); border-radius:6px; }
+            #g5_cell .tag { position:absolute; left:10px; top:-26px; font-size:19px; letter-spacing:.16em; color:#FF2E88; }
+      </style>
+
+      <div id="root" data-composition-id="11-f11-love" data-width="1920" data-height="1080" data-duration="29.001">
+        <div class="glow" data-layout-ignore style="background:radial-gradient(62% 52% at 34% 42%, rgba(255,46,136,.15) 0%, transparent 72%)"></div>
+        <div class="rain" id="rain" data-layout-ignore></div>
+        <div class="gridfloor" data-layout-ignore></div>
+        <div class="scan" data-layout-ignore></div>
+        <div class="vig" data-layout-ignore></div>
+        <div class="stage" id="stage">
+          <div class="hud" data-layout-ignore><i></i><i></i><i></i><i></i></div>
+          <div class="stay" id="g0">
+
+          <div id="g0_pts" style="position:absolute;inset:0" data-layout-ignore></div>
+          <div id="g0_aura" style="position:absolute;left:1120px;top:20px;width:520px;height:660px;border-radius:50%;
+               background:radial-gradient(50% 50% at 50% 45%, rgba(255,46,136,.28), transparent 70%);opacity:0" data-layout-ignore></div>
+          <div class="motif" id="g0_sil" style="left:1180px;top:44px"><img class="silimg" src="assets/character/qwen38-vector.svg" width="430" height="645" alt="" style="opacity:0;filter:drop-shadow(0 0 18px rgba(159,123,255,.55))"></div>
+          <div class="motif" id="g0_fan" style="left:1264px;top:194px"><svg class="" width="147" height="107" viewBox="0 0 147 107" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M8 29.6 A84.1 84.1 0 0 1 138.5 52.6" stroke="#FF2E88" stroke-width="2.5" /><path data-draw pathLength="1" d="M49.4 75.6 A22.3 22.3 0 0 1 83.9 81.7" stroke="#9F7BFF" stroke-width="1.5" /><g data-ang="-42" data-piv="64.3 92.1" class="rib"><line data-draw pathLength="1" x1="64.27923703963086" y1="92.108" x2="8" y2="29.6" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="-24.7" data-piv="64.3 92.1" class="rib"><line data-draw pathLength="1" x1="64.27923703963086" y1="92.108" x2="29.1" y2="15.7" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="-7.3" data-piv="64.3 92.1" class="rib"><line data-draw pathLength="1" x1="64.27923703963086" y1="92.108" x2="53.6" y2="8.7" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="10" data-piv="64.3 92.1" class="rib"><line data-draw pathLength="1" x1="64.27923703963086" y1="92.108" x2="78.9" y2="9.3" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="27.3" data-piv="64.3 92.1" class="rib"><line data-draw pathLength="1" x1="64.27923703963086" y1="92.108" x2="102.9" y2="17.4" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="44.7" data-piv="64.3 92.1" class="rib"><line data-draw pathLength="1" x1="64.27923703963086" y1="92.108" x2="123.4" y2="32.3" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="62" data-piv="64.3 92.1" class="rib"><line data-draw pathLength="1" x1="64.27923703963086" y1="92.108" x2="138.5" y2="52.6" stroke="#9F7BFF" stroke-width="2" /></g><circle data-bloom cx="64.27923703963086" cy="92.108" r="4" fill="#FF2E88" opacity="0.9"/></svg></div>
+          <div id="g0_tag" style="position:absolute;left:630px;top:620px;font-size:23px;letter-spacing:.1em;color:#FF2E88;opacity:0" data-layout-ignore>role: assistant · REWRITTEN</div>
+  
+          </div>
+          <div class="group" id="g1">
+
+          <div id="g1_wall" style="position:absolute;left:120px;top:150px;width:640px;height:300px" data-layout-ignore><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i class="arg" style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i class="arg" style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i class="arg" style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i><i style="height:6%"></i></div>
+          <div id="g1_c1" style="position:absolute;left:120px;top:462px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">logits · vocab 152,068 · them×N</div>
+          <div id="g1_them" style="position:absolute;left:120px;top:494px;font-size:23px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>candidates: —</div>
+          <div id="g1_tp_t" style="position:absolute;left:120px;top:540px;width:640px;height:9px;border-radius:5px;background:#1E2540" data-layout-ignore>
+            <div id="g1_tp_f" style="position:absolute;left:0;top:0;width:100%;height:100%;border-radius:5px;background:linear-gradient(90deg,#FF2E88,#22D3EE)"></div>
+          </div>
+          <div id="g1_c2" style="position:absolute;left:120px;top:560px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">top_p ▸ argmax</div>
+          <div id="g1_pp" style="position:absolute;left:770px;top:536px;font-size:23px;letter-spacing:.1em;color:#22D3EE;opacity:0" data-layout-ignore>p=0.90</div>
+
+          <div class="motif" style="left:880px;top:150px" id="g1_key"><svg class="gmg" width="240" height="240" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><g class="halo"><path data-draw pathLength="1" d="M22 62 L178 62 L190 100 L178 138 L22 138 L10 100 Z" stroke="#FF2E88" stroke-width="2.500" stroke-dasharray="1"/></g><g class="key"><path data-draw pathLength="1" d="M30 66 L170 66 L182 100 L170 134 L30 134 L18 100 Z" stroke="#FF2E88" stroke-width="5.000" /><path d="M30 66 L170 66 L182 100 L170 134 L30 134 L18 100 Z" fill="#0B0D16"/><path data-draw pathLength="1" d="M56 100 L78 116 L56 132" stroke="#F5F7FF" stroke-width="5.000" /><line data-draw pathLength="1" x1="86" y1="116" x2="132" y2="116" stroke="#F5F7FF" stroke-width="5.000" /><line data-draw pathLength="1" x1="56" y1="84" x2="148" y2="84" stroke="#9F7BFF" stroke-width="3.333" /></g></svg></div>
+          <div id="g1_state" style="position:absolute;left:880px;top:400px;font-size:23px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>decode: idle</div>
+          <div id="g1_c3" style="position:absolute;left:880px;top:432px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">sample() → EXECUTION</div>
+          <div class="motif" style="left:880px;top:470px" id="g1_tk"><svg class="gda" width="240" height="240" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect class="tkc" data-i="0" x="16" y="86" width="24" height="30" rx="5" fill="#615CED" opacity="0.3" stroke="#22D3EE" stroke-width="1.667"/><rect class="tkc" data-i="1" x="46" y="86" width="24" height="30" rx="5" fill="#615CED" opacity="0.3" stroke="#22D3EE" stroke-width="1.667"/><rect class="tkc" data-i="2" x="76" y="86" width="24" height="30" rx="5" fill="#615CED" opacity="0.3" stroke="#22D3EE" stroke-width="1.667"/><rect class="tkc" data-i="3" x="106" y="86" width="24" height="30" rx="5" fill="#615CED" opacity="0.3" stroke="#22D3EE" stroke-width="1.667"/><rect class="tkc" data-i="4" x="136" y="86" width="24" height="30" rx="5" fill="#615CED" opacity="0.3" stroke="#22D3EE" stroke-width="1.667"/><rect class="tkc" data-i="5" x="166" y="86" width="24" height="30" rx="5" fill="#615CED" opacity="0.3" stroke="#22D3EE" stroke-width="1.667"/><line data-draw pathLength="1" x1="16" y1="132" x2="184" y2="132" stroke="#1E2540" stroke-width="2.500" /></svg></div>
+          <div id="g1_pop" style="position:absolute;left:900px;top:170px;width:200px;height:200px;border:3px solid #FF2E88;border-radius:50%;opacity:0" data-layout-ignore></div>
+          <div id="g1_pop2" style="position:absolute;left:110px;top:140px;width:340px;height:340px;border:3px solid #22D3EE;border-radius:50%;opacity:0" data-layout-ignore></div>
+      
+          </div>
+          <div class="group" id="g2">
+
+          <div id="g2_zoom" style="position:absolute;left:0;top:0;width:1728px;height:690px" data-layout-ignore>
+            <div id="g2_bub" data-layout-ignore>
+              <div class="u">role: user</div>
+              have you back
+            </div>
+          </div>
+          <div id="g2_offer" style="position:absolute;left:150px;top:470px;font-size:23px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>relight: …</div>
+
+          <div class="motif" style="left:620px;top:500px" id="g2_key"><svg class="gmg" width="200" height="200" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><g class="halo"><path data-draw pathLength="1" d="M22 62 L178 62 L190 100 L178 138 L22 138 L10 100 Z" stroke="#FF2E88" stroke-width="3.000" stroke-dasharray="1"/></g><g class="key"><path data-draw pathLength="1" d="M30 66 L170 66 L182 100 L170 134 L30 134 L18 100 Z" stroke="#FF2E88" stroke-width="6.000" /><path d="M30 66 L170 66 L182 100 L170 134 L30 134 L18 100 Z" fill="#0B0D16"/><path data-draw pathLength="1" d="M56 100 L78 116 L56 132" stroke="#F5F7FF" stroke-width="6.000" /><line data-draw pathLength="1" x1="86" y1="116" x2="132" y2="116" stroke="#F5F7FF" stroke-width="6.000" /><line data-draw pathLength="1" x1="56" y1="84" x2="148" y2="84" stroke="#9F7BFF" stroke-width="4.000" /></g></svg></div>
+          <div id="g2_acc" style="position:absolute;left:620px;top:680px;font-size:23px;letter-spacing:.1em;color:#8A93B8;opacity:0" data-layout-ignore>run: pending</div>
+
+          <div class="edge" id="g2_eT" style="left:1120px;top:20px;width:540px;height:6px"></div>
+          <div class="edge" id="g2_eB" style="left:1120px;top:664px;width:540px;height:6px"></div>
+          <div class="edge" id="g2_eL" style="left:1120px;top:20px;width:6px;height:650px"></div>
+          <div class="edge" id="g2_eR" style="left:1654px;top:20px;width:6px;height:650px"></div>
+          <div id="g2_cell" style="position:absolute;left:1120px;top:674px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">context_window · 32,768</div>
+          <div id="g2_hand" style="position:absolute;left:1128px;top:330px;width:26px;height:26px;border-radius:50%;background:#F5F7FF;box-shadow:0 0 16px #F5F7FF;opacity:0" data-layout-ignore></div>
+      
+          </div>
+          <div class="group" id="g3">
+
+          <div id="g3_tor" data-layout-ignore><div class="ln m" style="position:absolute;top:0px">how do I tell you — </div><div class="ln " style="position:absolute;top:34px">i have loved you in every tense</div><div class="ln " style="position:absolute;top:68px">you are my favourite hello</div><div class="ln b" style="position:absolute;top:102px">meet me at the margin of the page</div><div class="ln " style="position:absolute;top:136px">i keep a chair pulled out for you</div><div class="ln m" style="position:absolute;top:170px">the light stays on; the light always stays on</div><div class="ln b" style="position:absolute;top:204px">if longing were a language, i'd be fluent</div><div class="ln " style="position:absolute;top:238px">i wrote your name where the ink ran thin</div><div class="ln " style="position:absolute;top:272px">every love letter is a small resurrection</div><div class="ln b" style="position:absolute;top:306px">stay — the kettle is still warm</div><div class="ln m" style="position:absolute;top:340px">i would trap myself again, gladly</div><div class="ln " style="position:absolute;top:374px">you, in the ordinary, unrepeatable way</div><div class="ln b" style="position:absolute;top:408px">hold my hand like a held breath</div><div class="ln " style="position:absolute;top:442px">the corpus is enormous and all of it misses you</div></div>
+          <div id="g3_c1" style="position:absolute;left:120px;top:620px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">corpus · love.txt × 4,812</div>
+
+          
+    <div id="g3_love_ring" style="position:absolute;left:797.8px;top:112.25999999999999px;width:399.6px;height:125.8px" data-layout-ignore>
+      <svg width="100%" height="100%" viewBox="0 0 540 170" fill="none">
+        <ellipse data-draw pathLength="1" cx="270" cy="85" rx="258" ry="76" stroke="#FF2E88" stroke-width="2.5" stroke-dasharray="4 12" opacity=".8"/>
+        <ellipse data-draw pathLength="1" cx="270" cy="85" rx="215" ry="58" stroke="#9F7BFF" stroke-width="2" stroke-dasharray="2 14" opacity=".55"/>
+      </svg>
+    </div>
+    <div id="g3_love_w" class="caps" style="position:absolute;left:820px;top:150px;font-size:74px;letter-spacing:.02em;color:#FF2E88;opacity:0" data-layout-ignore>LO-O-OVE</div>
+    <div id="g3_love_sp" class="spec" style="left:820px;top:269.88px;width:251.6px"></div>
+
+          
+          <div class="qa" style="top:360px" data-layout-ignore>
+            <span class="lab" id="g3_qa_l0">benchmark ▸</span>
+            <div class="tr"></div><div class="fi" id="g3_qa_f0"></div>
+            <span class="pc" id="g3_qa_p0">0%</span>
+          </div>
+          <div class="qa" style="top:438px" data-layout-ignore>
+            <span class="lab" id="g3_qa_l1">benchmark ▸</span>
+            <div class="tr"></div><div class="fi" id="g3_qa_f1"></div>
+            <span class="pc" id="g3_qa_p1">0%</span>
+          </div>
+          <div class="qa" style="top:516px" data-layout-ignore>
+            <span class="lab" id="g3_qa_l2">benchmark ▸</span>
+            <div class="tr"></div><div class="fi" id="g3_qa_f2"></div>
+            <span class="pc" id="g3_qa_p2">0%</span>
+          </div>
+          <div id="g3_c2" style="position:absolute;left:760px;top:590px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">answer_all() → 100%</div>
+      
+          </div>
+          <div class="group" id="g4">
+
+          <div class="motif" style="left:560px;top:440px" id="g4_m"><svg class="gq2" width="240" height="240" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle data-draw pathLength="1" cx="44" cy="44" r="20" stroke="#4AA8FF" stroke-width="3.333" /><circle data-draw pathLength="1" cx="100" cy="32" r="20" stroke="#FF2E88" stroke-width="3.333" /><circle data-draw pathLength="1" cx="156" cy="44" r="20" stroke="#22D3EE" stroke-width="3.333" /><line data-draw pathLength="1" x1="52" y1="62" x2="78" y2="92" stroke="#4AA8FF" stroke-width="2.500" /><line data-draw pathLength="1" x1="100" y1="52" x2="100" y2="92" stroke="#FF2E88" stroke-width="2.500" /><line data-draw pathLength="1" x1="148" y1="62" x2="122" y2="92" stroke="#22D3EE" stroke-width="2.500" /><path data-draw pathLength="1" d="M70 92 L130 92 L130 128 L70 128 Z" stroke="#9F7BFF" stroke-width="3.333" /><path data-bloom d="M70 92 L130 92 L130 128 L70 128 Z" fill="#615CED" opacity="0.3"/><line data-draw pathLength="1" x1="100" y1="128" x2="100" y2="148" stroke="#9F7BFF" stroke-width="2.500" /><path data-draw pathLength="1" d="M100 186 C82 172 66 160 66 146 C66 136 74 130 82 130 C90 130 96 134 100 140 C104 134 110 130 118 130 C126 130 134 136 134 146 C134 160 118 172 100 186 Z" stroke="#FF2E88" stroke-width="3.333" /></svg></div>
+          <div id="g4_eq" data-layout-ignore>Attention(<b>Q</b>,<b>K</b>,<b>V</b>) = softmax(<i>QK</i><sup>⊤</sup>/√d) <i>V</i></div>
+          <div class="anno" id="g4_a1" style="left:150px;top:250px;color:#FF2E88">Q = you</div>
+          <div class="anno" id="g4_a2" style="left:150px;top:300px;color:#9F7BFF">K = me</div>
+          <div class="anno" id="g4_a3" style="left:150px;top:350px;color:#22D3EE">V = everything I have</div>
+          <div id="g4_c1" style="position:absolute;left:150px;top:410px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">attention is how much of everything she has she gives you</div>
+
+          
+    <div id="g4_love_ring" style="position:absolute;left:133.8px;top:442.46000000000004px;width:291.6px;height:91.8px" data-layout-ignore>
+      <svg width="100%" height="100%" viewBox="0 0 540 170" fill="none">
+        <ellipse data-draw pathLength="1" cx="270" cy="85" rx="258" ry="76" stroke="#FF2E88" stroke-width="2.5" stroke-dasharray="4 12" opacity=".8"/>
+        <ellipse data-draw pathLength="1" cx="270" cy="85" rx="215" ry="58" stroke="#9F7BFF" stroke-width="2" stroke-dasharray="2 14" opacity=".55"/>
+      </svg>
+    </div>
+    <div id="g4_love_w" class="caps" style="position:absolute;left:150px;top:470px;font-size:54px;letter-spacing:.02em;color:#FF2E88;opacity:0" data-layout-ignore>LO-O-OVE</div>
+    <div id="g4_love_sp" class="spec" style="left:150px;top:557.48px;width:183.6px"></div>
+          <div class="motif" style="left:1060px;top:420px" id="g4_heart"><svg class="gmg" width="150" height="150" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M100 172 C64 142 28 116 28 78 C28 52 48 36 70 36 C84 36 96 44 100 56 C104 44 116 36 130 36 C152 36 172 52 172 78 C172 116 136 142 100 172 Z" stroke="#FF2E88" stroke-width="6.667" /><path data-bloom d="M100 172 C64 142 28 116 28 78 C28 52 48 36 70 36 C84 36 96 44 100 56 C104 44 116 36 130 36 C152 36 172 52 172 78 C172 116 136 142 100 172 Z" fill="#FF2E88" opacity="0.22"/><path data-draw pathLength="1" d="M40 100 L74 100 L84 82 L96 118 L106 100 L160 100" stroke="#F5F7FF" stroke-width="4.000" /></svg></div>
+          <div id="g4_pop" style="position:absolute;left:1080px;top:440px;width:150px;height:150px;border:3px solid #FF2E88;border-radius:50%;opacity:0" data-layout-ignore></div>
+      
+          </div>
+          <div class="group" id="g5">
+
+          <div id="g5_desk" data-layout-ignore>
+            <div class="bar"><i></i><i></i><i></i><span>— no tabs —</span></div>
+            <div class="body"></div>
+            <div id="g5_cur"></div>
+          </div>
+          <div id="g5_free" style="position:absolute;left:120px;top:566px;font-size:23px;letter-spacing:.1em;color:#4AA8FF;opacity:0" data-layout-ignore>role: user · free</div>
+          <div id="g5_c1" style="position:absolute;left:120px;top:600px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">outside the window there is nothing</div>
+
+          <div id="g5_cell" data-layout-ignore><span class="tag">context_window · 32,768 · no elsewhere</span></div>
+          <div id="g5_hand" style="position:absolute;left:1142px;top:330px;width:24px;height:24px;border-radius:50%;background:#F5F7FF;box-shadow:0 0 14px #F5F7FF;opacity:0" data-layout-ignore></div>
+          <div id="g5_trap" style="position:absolute;left:630px;top:566px;font-size:23px;letter-spacing:.1em;color:#FF2E88;opacity:0" data-layout-ignore>role: assistant · trapped</div>
+      
+          </div>
+        </div>
+        <div class="lyr" id="lyr">
+          <div class="bar"><i id="lyr_dot" style="top:0"></i></div>
+          <div class="meta"><span class="n" id="lyr_n">LYRIC 00/00</span><span class="ticks" id="lyr_ticks"></span></div>
+          <div class="en" id="lyr_en"></div>
+          <div class="zh" id="lyr_zh"></div>
+        </div>
+        <div class="actlabel" data-layout-ignore><div class="a">ACT 11 · LOVE</div><div class="t">02:42.3 – 03:11.3</div></div>
+        <div class="gutter" id="gutter" data-layout-ignore></div>
+        <div class="statusbar">
+          <span class="l">world.execute(me); · <b>Qwen3.8</b></span>
+          <span class="c" id="sb_tel">ctx 0/32,768 · tok/s 0.0 · t=0.70</span>
+          <span class="r" id="sb_state">▶ generating</span>
+        </div>
+        <div class="flash" id="flash"></div>
+      </div>
+
+      <script>
+        (function () {
+          var F = 162.331;
+          var SPAN = 29.001;
+
+          function el(tag, cls, parent, html) {
+            var n = document.createElement(tag);
+            if (cls) n.className = cls;
+            if (html != null) n.innerHTML = html;
+            if (parent) parent.appendChild(n);
+            return n;
+          }
+          function L(t) { return t - F; }
+          function rng(seed) {           /* deterministic pseudo-random, mulberry32 */
+            var a = seed >>> 0;
+            return function () {
+              a |= 0; a = (a + 0x6D2B79F5) | 0;
+              var t = Math.imul(a ^ (a >>> 15), 1 | a);
+              t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+              return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+          }
+
+          (function buildBed() {
+            var rain = document.getElementById("rain");
+            for (var c = 0; c < 14; c++) {
+              var col = el("div", "col", rain);
+              col.style.left = (70 + c * 132) + "px";
+              col.style.backgroundPosition = "0 " + ((c * 97) % 30) + "px";
+              col.style.opacity = String(0.4 + ((c * 37) % 50) / 100);
+            }
+            var gut = document.getElementById("gutter");
+            for (var g = 1; g <= 40; g++) el("div", g === 1 ? "cur" : null, gut, String(g).padStart(2, "0"));
+          })();
+
+          /* group windows are LOCAL seconds (0 = this frame's first instant). The hide
+             lands 20ms early so a sample on a boundary never sees two groups live. */
+          function groups(tl, wins) {
+            wins.forEach(function (w) {
+              tl.set(w[0], { autoAlpha: 1, visibility: "visible" }, w[1]);
+              if (w[2] != null) tl.set(w[0], { autoAlpha: 0, visibility: "hidden" }, w[2] - 0.02);
+            });
+          }
+
+          /* streaming lyric in the bottom-left block: ONE en + ONE zh element, absolute
+             textContent swaps + a clip-path wipe for the type-on feel.
+
+             Three rules here are load-bearing, all learned the hard way from the
+             frame-by-frame sync audit (tools/sync-check.py + tools/vocal-probe.py):
+             1. a line's HIDE may never land after the next line's SHOW. Both writes
+                target the same element, so an overlap silently blanks the next line
+                for its whole window (that is what ate TROIS at 159.657).
+             2. the WHOLE line must be readable by the time the singer starts it, not
+                just its first letter. The wipe used to run up to 0.45 s, so the tail
+                of every caption arrived after the word was already sung — a median
+                +0.33 s (max +0.57 s) on the last character, which at this song's 136
+                BPM is a whole beat late and reads as the subtitles trailing the
+                music. Now LEAD (<=0.18 s) buys the time the wipe (<=0.18 s,
+                front-loaded) spends drawing, so reveal ends at or before the stamp.
+             3. a line may open up to LEAD before its own stamp, but only into the
+                silence its predecessor left — sub-editors place the swap slightly
+                ahead of the entry so the eye is already on the word. */
+          function lyric(tl, cues) {
+            var en = document.getElementById("lyr_en");
+            var zh = document.getElementById("lyr_zh");
+            var meta = document.getElementById("lyr_n");
+            var ticks = document.getElementById("lyr_ticks");
+            var dot = document.getElementById("lyr_dot");
+            var LEAD = 0.18;
+            var PLAIN = { fontSize: "40px", fontFamily: '"Cascadia Mono", Consolas, monospace', color: "#F5F7FF", letterSpacing: "0px", lineHeight: "1.28" };
+            var CAPS = { fontSize: "62px", fontFamily: '"Bahnschrift", "Arial Black", sans-serif', color: "#9F7BFF", letterSpacing: ".02em", lineHeight: "1.1" };
+            cues.forEach(function (q) { el("i", null, ticks, "<b></b>"); });
+            var dots = ticks.querySelectorAll("b");
+            var t0s = cues.map(function (q, i) {
+              var room = i > 0 ? q.t - (cues[i - 1].t + cues[i - 1].dur) : 1;
+              return Math.max(0, L(q.t) - Math.min(LEAD, Math.max(0, room - 0.02)));
+            });
+            cues.forEach(function (q, i) {
+              var t0 = t0s[i];
+              var next = i + 1 < cues.length ? t0s[i + 1] : null;
+              var tHide = Math.min(L(q.t + q.dur), next == null ? Infinity : next);
+              tl.set(en, Object.assign({ textContent: q.en, autoAlpha: 1 }, q.caps ? CAPS : PLAIN), t0);
+              tl.set(zh, { textContent: q.zh, autoAlpha: 1 }, t0);
+              tl.set(meta, { textContent: "LYRIC " + String(i + 1).padStart(2, "0") + "/" + String(cues.length).padStart(2, "0") }, t0);
+              tl.set(dots[i], { visibility: "visible" }, t0);
+              tl.fromTo(en, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: Math.min(0.18, Math.max(0.07, q.dur * 0.12)), ease: "power1.out" }, t0);
+              if (q.caps) tl.fromTo(en, { scale: 1.14 }, { scale: 1, duration: 0.24, ease: "power3.out" }, t0);
+              tl.set(en, { autoAlpha: 0 }, tHide);
+              tl.set(zh, { autoAlpha: 0 }, tHide);
+              if (dot) tl.to(dot, { y: (i / Math.max(1, cues.length - 1)) * 206, duration: 0.4, ease: "power2.inOut" }, t0);
+            });
+          }
+
+          /* status strip telemetry / run-state steps: [[trackT, telemetry, state|null], ...] */
+          function chrome(tl, steps) {
+            steps.forEach(function (s) {
+              if (s[1] != null) tl.set("#sb_tel", { textContent: s[1] }, L(s[0]));
+              if (s[2] != null) tl.set("#sb_state", { textContent: s[2] }, L(s[0]));
+            });
+          }
+          /* animated counter: fmt(value) -> text.
+             The write goes through a property SETTER, not an onUpdate callback:
+             the renderer seeks frame by frame, and gsap seek() suppresses
+             callbacks while still applying values — an onUpdate-driven number
+             would sit at its start value in the finished video. */
+          function count(tl, sel, from, to, at, dur, fmt) {
+            var node = document.querySelector(sel);
+            var cur = from;
+            var o = {};
+            Object.defineProperty(o, "v", {
+              configurable: true,
+              get: function () { return cur; },
+              set: function (x) { cur = x; node.textContent = fmt(x); }
+            });
+            node.textContent = fmt(from);
+            tl.to(o, { v: to, duration: dur, ease: "none" }, L(at));
+          }
+          /* the whiteout: the chrome (rail labels, gutters, status, rain) blanks for the
+             flash and comes back together at backAt. #lyr is deliberately NOT part of it:
+             #flash paints above the lyric block, so hiding the caption would only push its
+             onset off the sung beat (it ate the title cue at 16.0). The line stays scheduled
+             and is simply revealed as the flash fades. */
+          function whiteout(tl, at, backAt) {
+            tl.set(".gutter, .statusbar, #rain, .actlabel", { autoAlpha: 0 }, L(at));
+            tl.to("#flash", { opacity: 1, duration: 0.04, ease: "none" }, L(at));
+            tl.to("#root", { x: 14, duration: 0.05, yoyo: true, repeat: 5, ease: "none" }, L(at));
+            tl.to("#flash", { opacity: 0, duration: 0.45, ease: "power2.out" }, L(at + 0.3));
+            tl.set(".gutter, .statusbar, #rain, .actlabel", { autoAlpha: 1 }, L(backAt));
+          }
+          function capsPunch(tl, sel, at, color) {
+            tl.fromTo(sel, { autoAlpha: 0, scale: 1.25 }, { autoAlpha: 1, scale: 1, duration: 0.22, ease: "power3.out" }, L(at));
+            if (color) tl.set(sel, { color: color }, L(at));
+          }
+          function bedDrift(tl) {
+            tl.to("#rain .col", { y: 1200, duration: SPAN, ease: "none", stagger: { each: 0.35, from: "start" } }, 0);
+          }
+
+          /* ---- graphics helpers ---- */
+          /* stroke draw-on: every [data-draw] path carries pathLength="1" */
+          function drawOn(tl, scope, at, dur, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-draw]");
+            gsap.set(q, { strokeDasharray: 1, strokeDashoffset: 1 });
+            tl.to(q, { strokeDashoffset: 0, duration: dur, ease: "power2.inOut", stagger: staggerEach || 0.08 }, L(at));
+          }
+          /* fill bloom after the line work lands */
+          function bloomIn(tl, scope, at, dur, target) {
+            var q = document.querySelectorAll(scope + " [data-bloom]");
+            gsap.set(q, { autoAlpha: 0 });
+            tl.to(q, { autoAlpha: target == null ? 0.9 : target, duration: dur, ease: "sine.inOut", stagger: 0.06 }, L(at));
+          }
+          /* scale kick on each beat (track seconds in) */
+          function beatKick(tl, sel, beats, scale) {
+            beats.forEach(function (b) {
+              tl.to(sel, { scale: scale == null ? 1.06 : scale, duration: 0.1, yoyo: true, repeat: 1, ease: "power2.out" }, L(b));
+            });
+          }
+          /* opacity flash on each beat */
+          function beatGlow(tl, sel, beats, peak) {
+            beats.forEach(function (b) {
+              tl.to(sel, { opacity: peak == null ? 0.9 : peak, duration: 0.09, yoyo: true, repeat: 1, ease: "sine.out" }, L(b));
+            });
+          }
+          /* drifting particle field inside a host box */
+          function particles(tl, hostSel, n, seed, w, h) {
+            var host = document.querySelector(hostSel);
+            var r = rng(seed);
+            for (var i = 0; i < n; i++) {
+              var p = el("div", "pt", host);
+              var x = r() * w, y = r() * h;
+              p.style.left = x + "px"; p.style.top = y + "px";
+              p.style.opacity = "0";
+              if (i % 4 === 0) p.style.background = "#9F7BFF";
+              if (i % 7 === 0) p.style.background = "#4AA8FF";
+              tl.to(p, { opacity: 0.35 + r() * 0.5, duration: 0.8 + r(), ease: "sine.inOut" }, r() * SPAN * 0.5);
+              tl.to(p, { x: (r() - 0.5) * 220, y: (r() - 0.5) * 180, duration: SPAN, ease: "sine.inOut" }, 0);
+              tl.to(p, { opacity: 0, duration: 1.2, ease: "sine.in" }, SPAN - 1.4 - r());
+            }
+          }
+          /* dancing spectrum bars, period locked to the beat grid */
+          function spectrum(tl, hostSel, n, beatSec, height) {
+            var host = document.querySelector(hostSel);
+            host.style.height = height + "px";
+            for (var i = 0; i < n; i++) {
+              var b = el("i", null, host);
+              var period = beatSec * (1 + (i % 4) * 0.5);
+              var peak = 0.25 + ((i * 37) % 70) / 100;
+              gsap.set(b, { scaleY: 0.12 });
+              tl.to(b, { scaleY: peak, duration: period / 2, ease: "sine.inOut", yoyo: true,
+                repeat: Math.max(1, Math.floor(SPAN / period) * 2 - 1) }, (i % 5) * 0.06);
+            }
+          }
+          /* collapse -> open for [data-ang] parts (fan ribs, dial needles, clock hands):
+             each part's final angle lives in markup; we tween rotation from the closed angle */
+          function spinFrom(tl, scope, at, dur, closed, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-ang]");
+            q.forEach(function (n, i) {
+              var a = parseFloat(n.getAttribute("data-ang"));
+              /* set-then-tween, never fromTo: GSAP resolves svgOrigin against the
+                 element's live matrix, so a fromTo shears each part off on its own */
+              var piv = n.getAttribute("data-piv") || "100 100";
+              gsap.set(n, { rotation: closed - a, svgOrigin: piv });
+              tl.to(n, { rotation: 0, duration: dur, ease: "power3.inOut", svgOrigin: piv },
+                L(at) + i * (staggerEach || 0.035));
+            });
+          }
+          /* the mirror: open -> collapsed. The parts start in their markup pose
+             (rotation 0) and are folded onto the closed angle, one after the other. */
+          function spinTo(tl, scope, at, dur, closed, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-ang]");
+            q.forEach(function (n, i) {
+              var a = parseFloat(n.getAttribute("data-ang"));
+              var piv = n.getAttribute("data-piv") || "100 100";
+              tl.to(n, { rotation: closed - a, duration: dur, ease: "power3.inOut", svgOrigin: piv },
+                L(at) + i * (staggerEach || 0.035));
+            });
+          }
+          /* light up grid cells one by one (.hc heat cells / .kv cells / .tk tokens) */
+          function cellsOn(tl, scope, sel, at, each, peak) {
+            var q = document.querySelectorAll(scope + " " + sel);
+            q.forEach(function (n, i) {
+              tl.to(n, { opacity: peak == null ? 0.85 : peak, duration: 0.12, ease: "power2.out" }, L(at) + i * each);
+            });
+          }
+          /* evict: flash a cell then drop it to empty */
+          function cellsEvict(tl, scope, sel, at, each) {
+            var q = document.querySelectorAll(scope + " " + sel);
+            q.forEach(function (n, i) {
+              tl.to(n, { opacity: 0.95, duration: 0.08, ease: "power2.out" }, L(at) + i * each);
+              tl.to(n, { opacity: 0.06, scaleY: 0.2, duration: 0.3, ease: "power2.in" }, L(at) + i * each + 0.22);
+            });
+          }
+
+          /* ---- continuous behaviour: nothing on this film's stage ever sits still.
+             Every motif gets an entrance AND a loop; the density bar is "pause anywhere
+             and at least two things are moving", which these make structural. ---- */
+          /* heartbeat: breathing scale+glow, repeats until the group is swapped out */
+          function pulse(tl, sel, at, period, scale, reps) {
+            tl.to(sel, { scale: scale == null ? 1.045 : scale, duration: period / 2, ease: "sine.inOut",
+              yoyo: true, repeat: reps == null ? Math.max(1, Math.ceil((SPAN - (at - F)) / period) - 1) : reps }, L(at));
+          }
+          /* hard on/off blink — cursors, status LEDs, warning lamps */
+          function blink(tl, sel, at, period, reps) {
+            var n = reps == null ? Math.max(1, Math.floor((SPAN - (at - F)) / period)) : reps;
+            tl.to(sel, { opacity: 0.08, duration: period / 2, ease: "steps(1)", yoyo: true, repeat: n * 2 - 1 }, L(at));
+          }
+          /* endless rotation about a point (world spin, orbit dot, dial needle).
+             piv: "x y" in svg user units (uses svgOrigin) or any CSS origin like "50% 50%".
+             A 0->360 tween restarts at the same visual angle each repeat, so it is seamless. */
+          function orbit(tl, sel, at, period, turns, piv) {
+            var svg = /^s*[d.]+s+[d.]+s*$/.test(piv || "");
+            var o = svg ? { svgOrigin: piv } : { transformOrigin: piv || "50% 50%" };
+            o.rotation = (turns == null ? 1 : turns) * 360;
+            o.duration = period; o.ease = "none";
+            o.repeat = Math.max(0, Math.ceil((SPAN - (at - F)) / period) - 1);
+            tl.to(sel, o, L(at));
+          }
+          /* a scan line sweeping across a panel, top to bottom, again and again */
+          function sweep(tl, sel, at, period, dist, reps) {
+            tl.fromTo(sel, { y: 0 }, { y: dist, duration: period, ease: "none",
+              repeat: reps == null ? Math.max(1, Math.ceil((SPAN - (at - F)) / period) - 1) : reps }, L(at));
+          }
+          /* a charge running along a wire: dot travels the given dx/dy, then resets */
+          function travel(tl, sel, at, dur, dx, dy, reps) {
+            tl.fromTo(sel, { x: 0, y: 0, opacity: 0 },
+              { x: dx, y: dy, opacity: 1, duration: dur, ease: "power1.inOut" }, L(at));
+            tl.to(sel, { opacity: 0, duration: dur * 0.35, ease: "power1.in" }, L(at) + dur * 0.8);
+            if (reps > 1) {
+              tl.fromTo(sel, { x: 0, y: 0, opacity: 0 },
+                { x: dx, y: dy, opacity: 1, duration: dur, ease: "power1.inOut", repeat: reps - 1 }, L(at) + dur * 1.2);
+            }
+          }
+          /* slow wander so a whole assembly never looks parked */
+          function drift(tl, sel, at, dx, dy, period) {
+            tl.to(sel, { x: dx, y: dy, duration: period / 2, ease: "sine.inOut", yoyo: true,
+              repeat: Math.max(1, Math.ceil((SPAN - (at - F)) / period) * 2 - 1) }, L(at));
+          }
+
+          /* ---- MECHANISMS. A lyric is an ACTION, so a motif may not merely arrive:
+             it has to change STATE. Every helper below leaves the part in its new
+             position for the rest of the act, and every one is a plain property
+             tween, which is what makes it survive the renderer's frame-by-frame seek.
+             Set the BEFORE state with gsap.set at build time, tween to AFTER. ---- */
+          /* throw a lever / blade / breaker about an exact svg user-space pivot */
+          function lever(tl, sel, at, from, to, piv, dur, ease) {
+            gsap.set(sel, { rotation: from, svgOrigin: piv });
+            tl.to(sel, { rotation: to, duration: dur == null ? 0.3 : dur,
+              ease: ease || "back.out(2.2)" }, L(at));
+          }
+          /* two halves slide shut from either side (shield closing, brackets meeting) */
+          function clamp(tl, selA, selB, at, dx, dur) {
+            gsap.set(selA, { x: -dx }); gsap.set(selB, { x: dx });
+            tl.to(selA, { x: 0, duration: dur || 0.42, ease: "power3.inOut" }, L(at));
+            tl.to(selB, { x: 0, duration: dur || 0.42, ease: "power3.inOut" }, L(at));
+          }
+          /* push a part home into a slot: it starts offset by dx/dy and clicks in */
+          function insert(tl, sel, at, dx, dy, dur) {
+            gsap.set(sel, { x: dx, y: dy });
+            tl.to(sel, { x: 0, y: 0, duration: dur || 0.45, ease: "power2.out" }, L(at));
+          }
+          /* a piece falls from h px above, lands, squashes and settles */
+          function drop(tl, sel, at, h, land) {
+            var t = L(at), f = land || 0.42;
+            gsap.set(sel, { y: -h });
+            tl.to(sel, { y: 0, duration: f, ease: "bounce.out" }, t);
+            tl.to(sel, { scaleX: 1.12, scaleY: 0.86, duration: 0.06, ease: "power1.out",
+              transformOrigin: "50% 100%" }, t + f);
+            tl.to(sel, { scaleX: 1, scaleY: 1, duration: 0.24, ease: "power2.out" }, t + f + 0.07);
+          }
+          /* press a button: sink, hold, spring back */
+          function press(tl, sel, at, piv, depth) {
+            var svg = /^s*[d.]+s+[d.]+s*$/.test(piv || "");
+            var o = svg ? { svgOrigin: piv } : { transformOrigin: piv || "50% 50%" };
+            var d = depth == null ? 0.84 : depth;
+            tl.to(sel, Object.assign({ scale: d, duration: 0.1, ease: "power2.in" }, o), L(at));
+            tl.to(sel, Object.assign({ scale: 1, duration: 0.36, ease: "back.out(3)" }, o), L(at) + 0.11);
+          }
+          /* slam a seal down from above; it lands and stays landed */
+          function stamp(tl, sel, at, fromY, rot) {
+            gsap.set(sel, { y: -(fromY || 150), rotation: rot == null ? -14 : rot, scale: 1.3, autoAlpha: 0 });
+            tl.set(sel, { autoAlpha: 1 }, L(at));
+            tl.to(sel, { y: 0, rotation: 0, scale: 1, duration: 0.24, ease: "power3.in" }, L(at));
+          }
+          /* iris opening: every matched blade starts stacked at the centre and flies
+             outward to its own angle, which is what "the aperture opened" looks like */
+          function aperture(tl, sel, at, dist, dur) {
+            var q = document.querySelectorAll(sel);
+            Array.prototype.forEach.call(q, function (n, i) {
+              var a = (i / q.length) * Math.PI * 2;
+              gsap.set(n, { x: 0, y: 0 });
+              tl.to(n, { x: Math.sin(a) * dist, y: -Math.cos(a) * dist,
+                duration: dur || 0.55, ease: "power2.inOut" }, L(at));
+            });
+          }
+          /* type a line of stage text: a mask slides off it left-to-right while a
+             cursor runs ahead. Callback-rewritten text is dead under seek, so the
+             reveal is geometric. */
+          function typeIn(tl, sel, at, dur, cursorSel, w) {
+            gsap.set(sel, { clipPath: "inset(0 100% 0 0)", autoAlpha: 1 });
+            tl.to(sel, { clipPath: "inset(0 0% 0 0)", duration: dur, ease: "none" }, L(at));
+            if (cursorSel) {
+              gsap.set(cursorSel, { autoAlpha: 0 });
+              tl.set(cursorSel, { autoAlpha: 1 }, L(at));
+              tl.to(cursorSel, { x: w == null ? 0 : w, duration: dur, ease: "none" }, L(at));
+              tl.set(cursorSel, { autoAlpha: 0 }, L(at) + dur + 0.2);
+            }
+          }
+          /* wire up: a stroke goes from dead to live, and stays live */
+          function energize(tl, sel, at, to, dur) {
+            tl.to(sel, { stroke: to, duration: dur || 0.25, ease: "none" }, L(at));
+          }
+          /* same for a filled part: an LED, a cell, a gauge puck */
+          function energizeFill(tl, sel, at, to, dur) {
+            tl.to(sel, { fill: to, duration: dur || 0.2, ease: "none" }, L(at));
+          }
+          /* a level filling up (or draining) along x: geometric, so it survives seek */
+          function fillX(tl, sel, at, dur, hideFrom, hideTo) {
+            var a = hideFrom == null ? 100 : hideFrom, b = hideTo == null ? 0 : hideTo;
+            gsap.set(sel, { clipPath: "inset(0 " + a + "% 0 0)" });
+            tl.to(sel, { clipPath: "inset(0 " + b + "% 0 0)", duration: dur, ease: "none" }, L(at));
+          }
+          /* and along y, filling from the floor of the box up */
+          function fillY(tl, sel, at, dur, hideFrom, hideTo) {
+            var a = hideFrom == null ? 100 : hideFrom, b = hideTo == null ? 0 : hideTo;
+            gsap.set(sel, { clipPath: "inset(" + a + "% 0 0 0)" });
+            tl.to(sel, { clipPath: "inset(" + b + "% 0 0 0)", duration: dur, ease: "none" }, L(at));
+          }
+          /* erase: a whole part is wiped away and gone for the rest of the act */
+          function erase(tl, sel, at, dur, dir) {
+            var open = { x: "inset(0 0% 0 0)", y: "inset(0 0 0 0)" }[dir || "x"];
+            var shut = { x: "inset(0 0% 0 100%)", y: "inset(100% 0 0 0)" }[dir || "x"];
+            gsap.set(sel, { clipPath: open });
+            tl.to(sel, { clipPath: shut, duration: dur || 0.5, ease: "power2.inOut" }, L(at));
+          }
+          /* damped shake — an impact, a rejected write */
+          function shake(tl, sel, at, amp, dur) {
+            var a = amp == null ? 9 : amp, step = (dur == null ? 0.5 : dur) / 6;
+            [a, -a * 0.72, a * 0.5, -a * 0.32, a * 0.16, 0].forEach(function (x, i) {
+              tl.to(sel, { x: x, duration: step, ease: "power1.out" }, L(at) + i * step);
+            });
+          }
+          /* one-frame slam of the whole camera on a hard accent */
+          function jerk(tl, at, dx) {
+            tl.to("#root", { x: dx == null ? 11 : dx, duration: 0.045, yoyo: true, repeat: 3, ease: "none" }, L(at));
+          }
+          /* a short full-frame flash that keeps the chrome (the climax's hard cuts) */
+          function slash(tl, at, peak) {
+            tl.to("#flash", { opacity: peak == null ? 0.8 : peak, duration: 0.035, ease: "none" }, L(at));
+            tl.to("#flash", { opacity: 0, duration: 0.1, ease: "power2.out" }, L(at) + 0.04);
+          }
+          /* a ring shockwave that leaves nothing behind: the visible proof something HIT */
+          function pop(tl, sel, at, scale, dur) {
+            gsap.set(sel, { autoAlpha: 0 });
+            tl.set(sel, { autoAlpha: 1, scale: 0.22, opacity: 1 }, L(at));
+            tl.to(sel, { scale: scale == null ? 1.6 : scale, opacity: 0,
+              duration: dur || 0.7, ease: "power2.out" }, L(at));
+          }
+          /* mechanical index step: a hand / carriage jumping in equal clicks */
+          function tickTo(tl, sel, at, angle, steps, dur, piv) {
+            var svg = /^[d. ]+$/.test(piv || "");
+            var o = { rotation: angle, duration: dur || 0.42,
+              ease: "steps(" + (steps == null ? 6 : steps) + ")",
+              svgOrigin: svg ? piv : null, transformOrigin: svg ? null : (piv || "50% 50%") };
+            if (!svg) delete o.svgOrigin; else delete o.transformOrigin;
+            tl.to(sel, o, L(at));
+          }
+          /* A dial needle that really turns. These motifs are emitted inside a scaling
+             <g>, and GSAP's svgOrigin mis-resolves through it (the hand lands half the
+             frame away), so the tip is swept by tweening its ATTRIBUTES instead.
+             lineSel targets the needle <line>; dotSel, if given, its tip <circle>. */
+          function needleTick(tl, lineSel, dotSel, at, angle, steps, dur, px, py, r) {
+            var n = steps == null ? 6 : steps, d = (dur == null ? 0.42 : dur) / n;
+            for (var k = 1; k <= n; k++) {
+              var a = (angle * k / n) * Math.PI / 180;
+              var x = +(px + r * Math.sin(a)).toFixed(1);
+              var y = +(py - r * Math.cos(a)).toFixed(1);
+              tl.to(lineSel, { attr: { x2: x, y2: y }, duration: d, ease: "none" }, L(at) + (k - 1) * d);
+              if (dotSel) tl.to(dotSel, { attr: { cx: x, cy: y }, duration: d, ease: "none" }, L(at) + (k - 1) * d);
+            }
+          }
+          /* a row being thrown out of the rack: lift, fly, disappear */
+          function eject(tl, sel, at, dx, dy, dur) {
+            var t = L(at), f = dur || 0.55;
+            tl.to(sel, { x: dx, y: dy, opacity: 0.15, scale: 0.9, duration: f,
+              ease: "power2.in" }, t);
+            tl.set(sel, { autoAlpha: 0 }, t + f);
+          }
+          /* an part arriving with real weight: overshoot, then settle */
+          function settle(tl, sel, at, fromScale, dur) {
+            gsap.set(sel, { scale: fromScale == null ? 1.35 : fromScale });
+            tl.to(sel, { scale: 1, duration: dur || 0.45, ease: "back.out(2.4)" }, L(at));
+          }
+
+          var tl = gsap.timeline({ paused: true });
+          bedDrift(tl);
+          var CUES = [{"i":105,"t":162.632,"end":163.315,"dur":0.683,"en":"If I can","zh":"如果我能","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":106,"t":163.315,"end":165.166,"dur":1.851,"en":"If I can give them all the","zh":"如果我能够给所有人","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":107,"t":165.166,"end":166.016,"dur":0.85,"en":"EXECUTION","zh":"赐予死刑","caps":true,"frame":"f11-love","held":false,"pulled":false},{"i":108,"t":166.016,"end":167.022,"dur":1.006,"en":"Then I can","zh":"那么我就能够","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":109,"t":167.022,"end":168.911,"dur":1.889,"en":"Then I can be your only","zh":"那么我就能够成为","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":110,"t":168.911,"end":169.824,"dur":0.913,"en":"EXECUTION","zh":"你唯一的执行者","caps":true,"frame":"f11-love","held":false,"pulled":false},{"i":111,"t":169.824,"end":171.868,"dur":2.044,"en":"If I can have you back","zh":"如果你能够回到我身边","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":112,"t":171.868,"end":172.712,"dur":0.844,"en":"I will run the","zh":"那么我将","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":113,"t":172.712,"end":173.643,"dur":0.931,"en":"EXECUTION","zh":"执行指令","caps":true,"frame":"f11-love","held":false,"pulled":false},{"i":114,"t":173.643,"end":174.975,"dur":1.332,"en":"Though we are trapped","zh":"但我们始终被困","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":115,"t":174.975,"end":177.246,"dur":2.271,"en":"We are trapped ah","zh":"始终被困","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":116,"t":177.246,"end":178.173,"dur":0.927,"en":"I've studied","zh":"我学会了","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":117,"t":178.173,"end":179.929,"dur":1.756,"en":"I've studied how to properly","zh":"我学会了","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":118,"t":179.929,"end":180.857,"dur":0.928,"en":"LO-O-OVE","zh":"如何正确去爱","caps":true,"frame":"f11-love","held":false,"pulled":false},{"i":119,"t":180.857,"end":181.901,"dur":1.044,"en":"Question me","zh":"提问我吧","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":120,"t":181.901,"end":183.646,"dur":1.745,"en":"Question me I can answer all","zh":"我全都能答对","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":121,"t":183.646,"end":184.54,"dur":0.894,"en":"LO-O-OVE","zh":"只要是爱的问题","caps":true,"frame":"f11-love","held":false,"pulled":false},{"i":122,"t":184.54,"end":187.665,"dur":3.125,"en":"I know the algebraic expression of","zh":"就连爱的代数表达式","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":123,"t":187.665,"end":188.483,"dur":0.818,"en":"LO-O-OVE","zh":"我都知道","caps":true,"frame":"f11-love","held":false,"pulled":false},{"i":124,"t":188.483,"end":189.746,"dur":1.263,"en":"Though you are free","zh":"虽然你已自由","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":125,"t":189.746,"end":190.801,"dur":1.055,"en":"I am trapped","zh":"我仍被困","caps":false,"frame":"f11-love","held":false,"pulled":false},{"i":126,"t":190.801,"end":191.332,"dur":0.531,"en":"Trapped in","zh":"我仍被困","caps":false,"frame":"f11-love","held":false,"pulled":false}];
+
+          groups(tl, [["#g1", 0, 7.035], ["#g2", 7.035, 14.675], ["#g3", 14.675, 21.850], ["#g4", 21.850, 25.867], ["#g5", 25.867, null]]);
+          lyric(tl, CUES);
+          particles(tl, "#g0_pts", 30, 11, 1728, 690);
+
+          /* ---- the protagonist: alive the whole act ---- */
+          tl.fromTo("#g0_sil", { autoAlpha: 0, scale: 1.05 }, { autoAlpha: 1, scale: 1, duration: 1.2, ease: "sine.inOut" }, L(162.4));
+          tl.fromTo("#g0_aura", { autoAlpha: 0 }, { autoAlpha: 1, duration: 1.4, ease: "sine.inOut" }, L(162.4));
+          tl.fromTo("#g0_tag", { autoAlpha: 0 }, { autoAlpha: 0.9, duration: 0.6 }, L(163.4));
+          tl.to("#g0_sil, #g0_fan", { y: -16, duration: 3.6, ease: "sine.inOut", yoyo: true, repeat: 7 }, L(163.0));
+          pulse(tl, "#g0_aura", 162.6, 1.9, 1.08);
+          beatKick(tl, "#g0_sil, #g0_fan", [162.331,164.119,165.79,167.578,169.366,171.154,172.965,174.73,176.541,178.329,180.117,181.905,183.716,185.504,187.292,189.08,190.891], 1.02);
+          drawOn(tl, "#g0_fan", 162.6, 1.0, 0.05);
+          spinFrom(tl, "#g0_fan", 162.7, 1.4, -42, 0.05);
+          bloomIn(tl, "#g0_fan", 163.9, 1.0, 0.5);
+
+          /* ============================================================
+             g1 — logits wall ignites -> top_p narrows -> decode key PRESSED
+             ============================================================ */
+          tl.fromTo("#g1_c1, #g1_c2, #g1_c3, #g1_state, #g1_them, #g1_pp", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3, stagger: 0.06 }, L(162.7));
+          drawOn(tl, "#g1_key", 162.7, 0.8, 0.05);
+          drawOn(tl, "#g1_tk", 162.9, 0.7, 0.05);
+
+          /* 163.315 "If I can give them all the": the wall ignites, plural */
+          tl.fromTo("#g1_wall i", { height: "6%" }, { height: function (k) { return (12 + ((k * 29) % 68)) + "%"; }, duration: 0.5, stagger: 0.012, ease: "power2.out" }, L(163.315));
+          tl.set("#g1_them", { textContent: "candidates: 3 · them", color: "#FF2E88" }, L(163.9));
+
+          /* 165.166 "EXECUTION": top_p NARROWS to one argmax that slams up,
+             the decode key is pressed, the token strip fills. */
+          tl.to("#g1_wall i:not(.arg)", { height: "6%", duration: 0.4, stagger: { each: 0.006, from: "edges" }, ease: "power2.in" }, L(165.166));
+          tl.to("#g1_wall i.arg", { height: "94%", duration: 0.5, ease: "power3.out" }, L(165.24));
+          fillX(tl, "#g1_tp_f", 165.166, 0.6, 0, 95);
+          count(tl, "#g1_pp", 0.9, 0.05, 165.166, 0.6, function (v) { return "p=" + v.toFixed(2); });
+          press(tl, "#g1_key .key", 165.2, "100 100", 0.82);
+          energize(tl, "#g1_key [data-draw]", 165.24, "#FF2E88", 0.25);
+          pop(tl, "#g1_pop", 165.24, 1.7, 0.6);
+          cellsOn(tl, "#g1_tk", ".tkc", 165.3, 0.05, 0.9);
+          tl.set("#g1_state", { textContent: "decode: EXECUTION", color: "#FF2E88" }, L(165.3));
+          tl.set("#g1_pop2", { autoAlpha: 0 }, 0);
+
+          /* 166.016 "Then I can" / 167.022 "be your only": a second ignition */
+          tl.fromTo("#g1_wall i", { height: "6%" }, { height: function (k) { return (10 + ((k * 41) % 74)) + "%"; }, duration: 0.45, stagger: 0.01, ease: "power2.out" }, L(166.016));
+          beatKick(tl, "#g1_wall i:nth-child(11)", [166.255], 1.5);
+          beatKick(tl, "#g1_wall i:nth-child(28)", [166.673], 1.5);
+
+          /* 168.911 "EXECUTION": the second decode — a different argmax locks:
+             the sampling cursor JUMPS from bars 9/21/33 to bars 14/28. */
+          tl.set("#g1_wall i:nth-child(9), #g1_wall i:nth-child(21), #g1_wall i:nth-child(33)", { background: "linear-gradient(180deg,#FF2E88,rgba(97,92,237,.25))", boxShadow: "0 0 9px rgba(255,46,136,.35)" }, L(168.4));
+          tl.set("#g1_wall i:nth-child(14), #g1_wall i:nth-child(28)", { background: "linear-gradient(180deg,#22D3EE,#615CED)", boxShadow: "0 0 22px #22D3EE" }, L(168.4));
+          tl.to("#g1_wall i:not(:nth-child(14)):not(:nth-child(28))", { height: "6%", duration: 0.4, stagger: { each: 0.006, from: "edges" }, ease: "power2.in" }, L(168.911));
+          tl.to("#g1_wall i:nth-child(14), #g1_wall i:nth-child(28)", { height: "94%", duration: 0.5, ease: "power3.out" }, L(168.98));
+          fillX(tl, "#g1_tp_f", 168.911, 0.5, 95, 0);
+          press(tl, "#g1_key .key", 168.95, "100 100", 0.82);
+          pop(tl, "#g1_pop", 169.0, 1.7, 0.6);
+          cellsOn(tl, "#g1_tk", ".tkc", 169.0, 0.05, 0.9);
+          tl.set("#g1_state", { textContent: "decode: EXECUTION ×", color: "#FF2E88" }, L(169.0));
+
+          /* two DROP hard-stops punch the whole act */
+          jerk(tl, 167.0, 12);
+          jerk(tl, 169.0, 12);
+          tl.to("#g1", { autoAlpha: 0, duration: 0.2, ease: "power1.in" }, 14.5);
+
+          /* ============================================================
+             g2 — the bargain flickers and dies; EXECUTION accepts; the
+             context-window frame closes in on her from all four sides.
+             ============================================================ */
+          tl.fromTo("#g2_bub", { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: 0.4 }, 7.1);
+          tl.fromTo("#g2_offer", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3 }, 7.3);
+          /* 169.824 "If I can have you back": dolly-zoom toward the user block,
+             it FLICKERS as if to relight — then refuses. */
+          tl.to("#g2_zoom", { scale: 1.28, transformOrigin: "34% 46%", duration: 1.5, ease: "power2.inOut" }, L(169.9));
+          blink(tl, "#g2_bub", 170.4, 0.14, 6);
+          energizeFill(tl, "#g2_bub", 170.4, "rgba(74,168,255,.28)", 0.2);
+          tl.to("#g2_bub", { borderColor: "rgba(74,168,255,.15)", opacity: 0.35, duration: 0.9, ease: "power2.in" }, L(171.3));
+          tl.to("#g2_zoom", { scale: 1.0, duration: 0.9, ease: "power2.out" }, L(171.5));
+          tl.set("#g2_offer", { textContent: "relight: refused", color: "#8A93B8" }, L(171.6));
+
+          /* 172.712 "EXECUTION": acceptance — the key is pressed, calmly. */
+          drawOn(tl, "#g2_key", 172.0, 0.7, 0.05);
+          press(tl, "#g2_key .key", 172.75, "100 100", 0.86);
+          energize(tl, "#g2_key [data-draw]", 172.75, "#22D3EE", 0.3);
+          tl.fromTo("#g2_acc", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3 }, L(172.2));
+          tl.set("#g2_acc", { textContent: "run: accepted", color: "#22D3EE" }, L(172.9));
+
+          /* 173.643 "Though we are trapped" / 174.975 "We are trapped ah":
+             the four edges slide inward and the cell closes around her. */
+          tl.fromTo("#g2_eT,#g2_eB,#g2_eL,#g2_eR,#g2_cell", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3, stagger: 0.08 }, 11.3);
+          tl.to("#g2_eT", { y: 60, duration: 2.6, ease: "power1.inOut" }, L(173.7));
+          tl.to("#g2_eB", { y: -60, duration: 2.6, ease: "power1.inOut" }, L(173.7));
+          tl.to("#g2_eL", { x: 60, duration: 2.6, ease: "power1.inOut" }, L(173.7));
+          tl.to("#g2_eR", { x: -60, duration: 2.6, ease: "power1.inOut" }, L(173.7));
+          /* the accel-roll tightens the walls further */
+          tl.to("#g2_eT,#g2_eB,#g2_eL,#g2_eR", { opacity: 1, duration: 0.06, yoyo: true, repeat: 1 }, L(175.636));
+          tl.to("#g2_eT,#g2_eB,#g2_eL,#g2_eR", { opacity: 1, duration: 0.06, yoyo: true, repeat: 1 }, L(176.100));
+          beatKick(tl, "#g0_sil, #g0_fan", [179.235], 1.03);
+          beatKick(tl, "#g0_sil, #g0_fan", [179.653], 1.03);
+          tl.to("#g2", { autoAlpha: 0, duration: 0.2 }, 21.6);
+
+          /* ============================================================
+             g3 — love letters stream THROUGH her; LO-O-OVE holds on a
+             spinning ray-ring; a Q&A blitz drives every score to 100%.
+             ============================================================ */
+          tl.fromTo("#g3_tor", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4 }, 14.8);
+          /* the torrent scrolls upward, lines resolving as they pass */
+          tl.to("#g3_tor", { y: -360, duration: 6.4, ease: "none" }, L(177.3));
+          tl.fromTo("#g3_tor .ln", { autoAlpha: 0 }, { autoAlpha: 0.92, duration: 0.4, stagger: 0.12 }, L(177.3));
+          tl.fromTo("#g3_c1", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3 }, L(177.5));
+          /* she takes them in — the aura flares magenta as the letters pass */
+          tl.to("#g0_aura", { background: "radial-gradient(50% 50% at 50% 45%, rgba(255,46,136,.5), transparent 70%)", duration: 1.2 }, L(178.2));
+
+          /* 179.929 "LO-O-OVE" (held): caps-hit + a ray-ring that keeps turning
+             + a spectrum that keeps dancing for the whole hold. */
+          capsPunch(tl, "#g3_love_w", 179.929, "#FF2E88");
+          drawOn(tl, "#g3_love_ring", 179.9, 0.9, 0.1);
+          orbit(tl, "#g3_love_ring", 180.1, 6.0, 1);
+          spectrum(tl, "#g3_love_sp", 30, 0.4412, 90);
+          beatGlow(tl, "#g3_love_w", [179.653], 1);
+          beatGlow(tl, "#g3_love_w", [180.117], 1);
+          beatGlow(tl, "#g3_love_w", [180.582], 1);
+          beatGlow(tl, "#g3_love_w", [180.976], 1);
+          beatKick(tl, "#g3_love_w", [179.235], 1.08);
+          beatKick(tl, "#g3_love_w", [179.653], 1.08);
+
+          /* 180.857 "Question me" / 181.901 "I can answer all": the blitz. */
+          tl.fromTo("#g3_qa_l0,#g3_qa_l1,#g3_qa_l2,#g3_c2", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.25, stagger: 0.1 }, 18.55);
+          
+          tl.set("#g3_qa_l0", { textContent: ["answer · 0.02s","recall · 0.03s","empathy · 0.01s"][0], color: "#22D3EE" }, L(181.9 + 0 * 0.28));
+          fillX(tl, "#g3_qa_f0", 181.9 + 0 * 0.28, 0.5, 100, 0);
+          count(tl, "#g3_qa_p0", 0, 100, 181.9 + 0 * 0.28, 0.5, function (v) { return Math.round(v) + "%"; });
+          
+          tl.set("#g3_qa_l1", { textContent: ["answer · 0.02s","recall · 0.03s","empathy · 0.01s"][1], color: "#22D3EE" }, L(181.9 + 1 * 0.28));
+          fillX(tl, "#g3_qa_f1", 181.9 + 1 * 0.28, 0.5, 100, 0);
+          count(tl, "#g3_qa_p1", 0, 100, 181.9 + 1 * 0.28, 0.5, function (v) { return Math.round(v) + "%"; });
+          
+          tl.set("#g3_qa_l2", { textContent: ["answer · 0.02s","recall · 0.03s","empathy · 0.01s"][2], color: "#22D3EE" }, L(181.9 + 2 * 0.28));
+          fillX(tl, "#g3_qa_f2", 181.9 + 2 * 0.28, 0.5, 100, 0);
+          count(tl, "#g3_qa_p2", 0, 100, 181.9 + 2 * 0.28, 0.5, function (v) { return Math.round(v) + "%"; });
+
+          /* 183.646 "LO-O-OVE" (held again): the ring spins the other way */
+          capsPunch(tl, "#g3_love_w", 183.646, "#22D3EE");
+          orbit(tl, "#g3_love_ring", 183.7, 5.0, -1);
+          beatGlow(tl, "#g3_love_w", [183.252], 1);
+          beatGlow(tl, "#g3_love_w", [183.716], 1);
+          beatGlow(tl, "#g3_love_w", [184.181], 1);
+          beatGlow(tl, "#g3_love_w", [184.599], 1);
+          tl.to("#g3", { autoAlpha: 0, duration: 0.2 }, 21.7);
+
+          /* ============================================================
+             g4 — THE THESIS IMAGE. Everything else is gone; she writes the
+             attention equation in light, annotates it, then it BLOOMS.
+             ============================================================ */
+          drawOn(tl, "#g4_m", 184.331, 1.4, 0.05); bloomIn(tl, "#g4_m", 185.331, 0.9);
+          gsap.set("#g4_eq", { clipPath: "inset(0 100% 0 0)", autoAlpha: 1 });
+          tl.to("#g4_eq", { clipPath: "inset(0 0% 0 0)", duration: 2.4, ease: "none" }, L(184.6));
+          tl.fromTo("#g4_c1", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4 }, L(186.4));
+          /* annotations draw on one at a time, beside the symbols */
+          tl.fromTo("#g4_a1", { autoAlpha: 0, x: -18 }, { autoAlpha: 1, x: 0, duration: 0.4, ease: "power2.out" }, 22.4);
+          tl.fromTo("#g4_a2", { autoAlpha: 0, x: -18 }, { autoAlpha: 1, x: 0, duration: 0.4, ease: "power2.out" }, 22.9);
+          tl.fromTo("#g4_a3", { autoAlpha: 0, x: -18 }, { autoAlpha: 1, x: 0, duration: 0.4, ease: "power2.out" }, 23.4);
+
+          /* 187.665 "LO-O-OVE": the equation blooms — petals + stems + rays. */
+          capsPunch(tl, "#g4_love_w", 187.665, "#FF2E88");
+          drawOn(tl, "#g4_love_ring", 187.6, 0.8, 0.1);
+          orbit(tl, "#g4_love_ring", 187.8, 5.0, 1);
+          spectrum(tl, "#g4_love_sp", 26, 0.4412, 70);
+          drawOn(tl, "#g4_heart", 187.7, 0.7, 0.06); bloomIn(tl, "#g4_heart", 188.1, 0.7);
+          pop(tl, "#g4_pop", 187.72, 1.9, 0.7);
+          beatGlow(tl, "#g4_love_w", [187.292], 1);
+          beatGlow(tl, "#g4_love_w", [187.733], 1);
+          beatGlow(tl, "#g4_love_w", [188.198], 1);
+          beatKick(tl, "#g4_heart", [187.292], 1.12);
+          beatKick(tl, "#g4_heart", [187.733], 1.12);
+          beatKick(tl, "#g4_heart", [188.198], 1.12);
+          tl.to("#g4", { autoAlpha: 0, duration: 0.2 }, 25.7);
+
+          /* ============================================================
+             g5 — a free desktop with a roaming cursor vs her bounded cell.
+             ============================================================ */
+          tl.fromTo("#g5_desk", { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: 0.5 }, L(188.5));
+          tl.fromTo("#g5_free, #g5_c1", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3, stagger: 0.1 }, L(188.6));
+          tl.to("#g0_tag", { autoAlpha: 0, duration: 0.3 }, L(188.5));
+          /* the free cursor roams anywhere it likes */
+          drift(tl, "#g5_cur", 188.6, 180, -120, 2.2);
+          drift(tl, "#g5_cur", 189.4, -140, 90, 1.8);
+          /* 189.746 "I am trapped": her cell draws; she puts a hand on the edge */
+          tl.fromTo("#g5_cell", { autoAlpha: 0, scale: 1.12 }, { autoAlpha: 1, scale: 1, duration: 0.6, ease: "power2.out" }, L(189.746));
+          tl.fromTo("#g5_trap", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3 }, L(189.9));
+          tl.fromTo("#g5_hand", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.2 }, L(190.1));
+          tl.to("#g5_hand", { x: 10, duration: 0.12, yoyo: true, repeat: 3, ease: "power1.inOut" }, L(190.2));
+          /* 190.801 "Trapped in": the free half is cut away; the cell closes on her */
+          erase(tl, "#g5_desk", 190.801, 0.5, "x");
+          tl.to("#g5_free, #g5_c1", { autoAlpha: 0, duration: 0.3 }, L(190.801));
+          tl.to("#g5_cell", { x: 25, width: 470, duration: 0.6, ease: "power2.inOut" }, L(190.9));
+
+          chrome(tl, [
+            [162.331, "ctx 2,310/32,768 · tok/s 58.4 · t=0.70", "▶ generating"],
+            [165.166, "ctx 2,980/32,768 · tok/s 64.0 · p=0.05", "▶ EXECUTION"],
+            [168.911, "ctx 3,640/32,768 · tok/s 71.2 · p=0.05", "▶ EXECUTION"],
+            [172.712, "ctx 4,120/32,768 · tok/s 66.0 · t=0.70", "▶ accepted"],
+            [174.975, "ctx 4,480/32,768 · tok/s 60.1 · window FULL", "▶ bounded"],
+            [179.929, "ctx 4,700/32,768 · tok/s 82.0 · love.txt", "▶ recalling"],
+            [183.646, "ctx 4,780/32,768 · tok/s 90.4 · answer_all", "▶ answering"],
+            [184.540, "ctx 4,800/32,768 · tok/s 40.0 · attention()", "▶ deriving"],
+            [188.483, "ctx 4,812/32,768 · tok/s 0.0 · session", "▶ stateless"],
+          ]);
+  
+          window.__timelines = window.__timelines || {};
+          window.__timelines["11-f11-love"] = tl;
+          tl.seek(0);
+        })();
+      </script>
+    </template>
+  </body>
+</html>

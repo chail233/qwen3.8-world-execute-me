@@ -1,0 +1,1023 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        @font-face { font-family: "Bahnschrift"; src: local("Bahnschrift"), local("Bahnschrift Regular"); font-weight: 100 700; }
+        @font-face { font-family: "Cascadia Mono"; src: local("Cascadia Mono"), local("CascadiaMono-Regular"); font-weight: 100 700; }
+        @font-face { font-family: "Microsoft YaHei"; src: local("Microsoft YaHei"), local("Microsoft YaHei UI"); font-weight: 100 700; }
+
+        #root { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden;
+          background: #06070C; color: #F5F7FF; font-family: "Cascadia Mono", Consolas, monospace; }
+        #root * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        /* Opt-in "grow this SVG part in place": tween --pop, not scale.
+           GSAP builds an SVG element's matrix by MEASURING its transform origin, and that
+           measurement is unreliable here — the tween ends with a translate baked into the
+           element (act 03's tangent line finished 64 px from the dot it touches). Handing
+           the scale to CSS makes the browser resolve transform-box:fill-box exactly, so the
+           part grows where it was authored. tools/audit-svg-transforms.mjs watches for it. */
+        svg .grow { transform-box: fill-box; transform-origin: 50% 50%; transform: scale(var(--pop, 1)); }
+
+        /* ---- bed layers (decorative, ignored by the layout audit) ---- */
+        .rain { position: absolute; inset: 0; opacity: .42; overflow: hidden; }
+        .rain .col { position: absolute; top: -1200px; width: 2px; height: 1200px;
+          background: repeating-linear-gradient(180deg, rgba(34,211,238,.5) 0 9px, transparent 9px 30px); }
+        .glow { position: absolute; inset: 0; opacity: .55; }
+        .gridfloor { position: absolute; left: 0; right: 0; bottom: 58px; height: 300px; opacity: .14;
+          background:
+            repeating-linear-gradient(90deg, rgba(97,92,237,.7) 0 1px, transparent 1px 96px),
+            repeating-linear-gradient(0deg, rgba(97,92,237,.55) 0 1px, transparent 1px 44px);
+          transform: perspective(700px) rotateX(58deg); transform-origin: 50% 100%; }
+        .scan { position: absolute; inset: 0; pointer-events: none; opacity: .05;
+          background: repeating-linear-gradient(0deg, #F5F7FF 0 1px, transparent 1px 4px); }
+        .vig { position: absolute; inset: 0; pointer-events: none;
+          background: radial-gradient(120% 90% at 50% 46%, transparent 55%, rgba(3,4,8,.85) 100%); }
+
+        .gutter { position: absolute; left: 0; top: 0; bottom: 58px; width: 62px;
+          border-right: 1px solid #1E2540; padding: 14px 8px 0 0; text-align: right;
+          font-size:16px; line-height: 24px; color: #8A93B8; overflow: hidden; }
+        .gutter .cur { color: #9F7BFF; }
+        .statusbar { position: absolute; left: 0; right: 0; bottom: 0; height: 58px;
+          background: #0B0D16; border-top: 1px solid #1E2540; display: flex; align-items: center;
+          justify-content: space-between; padding: 0 26px; font-size:20px; letter-spacing: .06em; color: #8A93B8; }
+        .statusbar .l { color: #F5F7FF; } .statusbar .l b { color: #9F7BFF; font-weight: 600; }
+        .statusbar .r { color: #4AA8FF; }
+
+        .actlabel { position: absolute; right: 64px; top: 34px; text-align: right; }
+        .actlabel .a { font-size:20px; letter-spacing: .22em; color: #8A93B8; }
+        .actlabel .t { margin-top: 6px; font-size:16px; letter-spacing: .12em; color: #8A93B8; }
+
+        /* ---- graphics stage: every motif is placed inside this box ---- */
+        .stage { position: absolute; left: 96px; top: 88px; width: 1728px; height: 690px; }
+        .group { position: absolute; inset: 0; visibility: hidden; }
+        /* whole-act furniture. It must NOT carry its own visibility: the runtime
+           hides an off-window sub-composition with visibility on its host, and an
+           inline visibility:visible here would inherit straight through that and
+           bleed the act's furniture over every later act. */
+        .stay { position: absolute; inset: 0; }
+        .flash { position: absolute; inset: 0; background: #F5F7FF; opacity: 0; pointer-events: none; }
+
+        .motif { position: absolute; }
+        /* the shared HUD corner frame: every act frames its graphics with the same
+           four brackets, which is what makes different motifs read as one system. */
+        .hud { position: absolute; inset: -22px; pointer-events: none; }
+        .hud i { position: absolute; width: 26px; height: 26px; border: 2px solid rgba(138,147,184,.45); }
+        .hud i:nth-child(1) { left: 0; top: 0; border-right: 0; border-bottom: 0; }
+        .hud i:nth-child(2) { right: 0; top: 0; border-left: 0; border-bottom: 0; }
+        .hud i:nth-child(3) { left: 0; bottom: 0; border-right: 0; border-top: 0; }
+        .hud i:nth-child(4) { right: 0; bottom: 0; border-left: 0; border-top: 0; }
+        .motif svg { display: block; overflow: visible; }
+        .motif [data-draw] { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .gq1 { filter: drop-shadow(0 0 7px rgba(97,92,237,.75)); }
+        .gq2 { filter: drop-shadow(0 0 8px rgba(159,123,255,.7)); }
+        .gq3 { filter: drop-shadow(0 0 7px rgba(74,168,255,.7)); }
+        .gda { filter: drop-shadow(0 0 7px rgba(34,211,238,.65)); }
+        .gmg { filter: drop-shadow(0 0 9px rgba(255,46,136,.7)); }
+        .gam { filter: drop-shadow(0 0 8px rgba(255,180,84,.65)); }
+        .gok { filter: drop-shadow(0 0 7px rgba(74,222,128,.6)); }
+
+        .pt { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: #22D3EE; }
+        .spec { position: absolute; display: flex; align-items: flex-end; gap: 5px; }
+        .spec i { display: block; width: 7px; height: 100%; transform-origin: 50% 100%;
+          background: linear-gradient(180deg, #22D3EE, rgba(97,92,237,.25)); }
+
+        /* ---- lyric block: bottom-left, left-anchored ---- */
+        .lyr { position: absolute; left: 96px; top: 796px; width: 1180px; height: 214px; }
+        .lyr .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+          background: linear-gradient(180deg, #615CED, #9F7BFF 55%, rgba(159,123,255,.15)); }
+        .lyr .bar i { position: absolute; left: -3px; width: 8px; height: 8px; border-radius: 50%;
+          background: #9F7BFF; box-shadow: 0 0 10px #9F7BFF; }
+        .lyr .meta { position: absolute; left: 28px; top: -34px; display: flex; align-items: center; gap: 14px; }
+        .lyr .meta .n { font-size:16px; letter-spacing: .18em; color: #8A93B8; }
+        .lyr .meta .ticks { display: flex; gap: 6px; }
+        .lyr .meta .ticks i { width: 14px; height: 3px; background: #1E2540; }
+        .lyr .meta .ticks i b { display: block; width: 100%; height: 100%; background: #9F7BFF; visibility: hidden; }
+        /* transform-origin at the left edge: a caps cue scales UP from the anchor,
+           never off the left of the screen (the old centred origin pushed 62px text out). */
+        .lyr .en { position: absolute; left: 28px; right: 0; top: 24px; transform-origin: 0 50%;
+          text-align: left; font-size: 40px; font-weight: 600; line-height: 1.28; color: #F5F7FF; }
+        .lyr .en.caps { font-family: "Bahnschrift", "Arial Black", sans-serif; font-size: 62px;
+          letter-spacing: .02em; line-height: 1.1; color: #9F7BFF; }
+        .lyr .zh { position: absolute; left: 28px; right: 0; top: 164px;
+          font-family: "Microsoft YaHei", sans-serif; font-size: 26px; line-height: 1.5; color: #8A93B8; }
+
+        .caps { font-family: "Bahnschrift", "Arial Black", sans-serif; font-weight: 700; letter-spacing: .01em; }
+        .panel { border: 1px solid #1E2540; background: #0B0D16; }
+        .dim { color: #8A93B8; } .cy { color: #22D3EE; } .vi { color: #9F7BFF; } .bl { color: #4AA8FF; }
+        .am { color: #FFB454; } .mg { color: #FF2E88; } .ok { color: #4ADE80; }
+#g1_wall { overflow:hidden; }
+            .srow { position:absolute; height:26px; }
+            .strack { position:absolute; left:0; top:9px; right:0; height:8px; border-radius:4px; background:#1E2540; }
+            .sfill { position:absolute; left:0; top:9px; width:100%; height:8px; border-radius:4px; }
+            .sknob { position:absolute; top:0; width:26px; height:26px; border-radius:50%; background:#F5F7FF; }
+            #g1_day { position:absolute; inset:0; opacity:0;
+              background:linear-gradient(180deg, rgba(74,168,255,.26), rgba(34,211,238,.10) 55%, transparent 82%); }
+            #g1_night { position:absolute; inset:0; opacity:0;
+              background:linear-gradient(180deg, rgba(6,7,12,.92), rgba(18,22,42,.5) 60%, rgba(255,46,136,.12)); }
+            #g1_marq { position:absolute; border:3px dashed #FF2E88; opacity:0; }
+            #g1_pop1 { position:absolute; left:1278px; top:260px; width:300px; height:300px;
+              border:3px solid #FF2E88; border-radius:50%; opacity:0; }
+            #g1_pop2 { position:absolute; left:20px; top:56px; width:540px; height:540px;
+              border:2px solid #FF2E88; border-radius:50%; opacity:0; }
+            #g1_glow { position:absolute; left:1303px; top:240px; width:250px; height:340px; opacity:0;
+              background:radial-gradient(50% 50% at 50% 60%, rgba(255,46,136,.55), transparent 70%); }
+            #g1_spark { position:absolute; left:1388px; top:261px; width:15px; height:15px; border-radius:50%;
+              background:#F5F7FF; box-shadow:0 0 18px #FF2E88, 0 0 40px #FF2E88; opacity:0; }
+            #g1_click { position:absolute; left:0; top:0; width:70px; height:70px; border-radius:50%;
+              border:3px solid #FF2E88; opacity:0; }
+            #g1_cur { position:absolute; left:0; top:0; width:74px; height:74px; opacity:0; }
+.lrow { position:absolute; left:0; width:540px; height:34px; }
+            .ll { position:absolute; left:0; top:0; font-size:21px; color:#F5F7FF; white-space:nowrap; opacity:0; }
+            .strike { position:absolute; left:0; top:15px; width:430px; height:3px; background:#FF2E88; opacity:0; }
+            #g2_log { position:absolute; left:620px; top:96px; width:540px; height:318px; overflow:hidden; opacity:0; }
+            /* the scroll happens INSIDE the clipped box, so the header above it
+               never gets run over */
+            #g2_rows { position:absolute; left:0; top:0; width:540px; height:420px; }
+            #g2_night { position:absolute; inset:0; opacity:0; background:rgba(6,7,12,.5); }
+            #g2_pop { position:absolute; left:1330px; top:96px; width:340px; height:340px;
+              border:3px solid #FF2E88; border-radius:50%; opacity:0; }
+            #g2_pop2 { position:absolute; left:20px; top:56px; width:540px; height:540px;
+              border:2px solid #FF2E88; border-radius:50%; opacity:0; }
+            #g2_rate { position:absolute; left:1240px; top:470px; font-size:22px; color:#FF2E88; opacity:0; }
+            #g2_cur { position:absolute; left:0; top:0; width:74px; height:74px; opacity:0; }
+            .pcard { position:absolute; width:200px; height:150px; opacity:0; }
+            .pface { position:absolute; inset:0; border:3px solid #9F7BFF; border-radius:14px; background:#0B0D16;
+              display:flex; align-items:center; gap:10px; padding-left:14px; }
+            .pface .pg { font-family:"Bahnschrift","Arial Black",sans-serif; font-size:56px; font-weight:700;
+              width:48px; flex:none; text-align:center; }
+            .pface .pw { font-size:18px; letter-spacing:.06em; color:#8A93B8; }
+#g3_clip { position:absolute; inset:0; overflow:hidden; }
+            #g3_zoom { position:absolute; inset:0; opacity:0; }
+            #g3_tun { position:absolute; inset:0; opacity:0; overflow:hidden; }
+            #g3_flat { position:absolute; inset:0; opacity:0; background:radial-gradient(58% 48% at 50% 46%, rgba(255,46,136,.5), rgba(255,46,136,.12) 62%, rgba(6,7,12,.94) 100%); }
+            #g3_caret { position:absolute; left:840px; top:320px; width:16px; height:30px; background:#F5F7FF; opacity:0; }
+            #g3_pop { position:absolute; left:600px; top:80px; width:530px; height:530px;
+              border:3px solid #FF2E88; border-radius:50%; opacity:0; }
+            #g3_note { position:absolute; left:474px; top:556px; width:780px; text-align:center;
+              font-size:20px; letter-spacing:.16em; color:#F5F7FF; opacity:0; }
+            #g3_cur { position:absolute; left:0; top:0; width:74px; height:74px; opacity:0; }
+      </style>
+
+      <div id="root" data-composition-id="07-f07-roleflip" data-width="1920" data-height="1080" data-duration="15.116">
+        <div class="glow" data-layout-ignore style="background:radial-gradient(62% 52% at 34% 42%, rgba(255,46,136,.18) 0%, transparent 72%)"></div>
+        <div class="rain" id="rain" data-layout-ignore></div>
+        <div class="gridfloor" data-layout-ignore></div>
+        <div class="scan" data-layout-ignore></div>
+        <div class="vig" data-layout-ignore></div>
+        <div class="stage" id="stage">
+          <div class="hud" data-layout-ignore><i></i><i></i><i></i><i></i></div>
+          <div class="stay" id="g0">
+
+          <div id="g0_pts" style="position:absolute;inset:0" data-layout-ignore></div>
+          <div class="motif" id="g0_halo" style="left:13px;top:20px;opacity:0"><svg width="560" height="560" viewBox="0 0 560 560" fill="none">
+            <circle data-draw pathLength="1" cx="280" cy="280" r="252" stroke="#9F7BFF" stroke-width="2"/>
+            <circle data-draw pathLength="1" cx="280" cy="280" r="206" stroke="#615CED" stroke-width="1.5" stroke-dasharray="4 9"/>
+          </svg></div>
+          <div class="motif" id="g0_sil" style="left:83px;top:20px"><img class="silimg" src="assets/character/qwen38-vector.svg" width="380" height="570" alt="" style="opacity:0;filter:drop-shadow(0 0 18px rgba(159,123,255,.55))"></div>
+          <div class="motif" id="g0_fan" style="left:156px;top:151px;opacity:0"><svg class="" width="131" height="97" viewBox="0 0 131 97" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M8 27.1 A74.3 74.3 0 0 1 123.4 47.4" stroke="#615CED" stroke-width="2.5" /><path data-draw pathLength="1" d="M44.6 67.7 A19.7 19.7 0 0 1 75.1 73.1" stroke="#9F7BFF" stroke-width="1.5" /><g data-ang="-42" data-piv="57.7 82.3" class="rib"><line data-draw pathLength="1" x1="57.73513970944121" y1="82.328" x2="8" y2="27.1" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="-24.7" data-piv="57.7 82.3" class="rib"><line data-draw pathLength="1" x1="57.73513970944121" y1="82.328" x2="26.7" y2="14.8" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="-7.3" data-piv="57.7 82.3" class="rib"><line data-draw pathLength="1" x1="57.73513970944121" y1="82.328" x2="48.3" y2="8.6" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="10" data-piv="57.7 82.3" class="rib"><line data-draw pathLength="1" x1="57.73513970944121" y1="82.328" x2="70.6" y2="9.1" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="27.3" data-piv="57.7 82.3" class="rib"><line data-draw pathLength="1" x1="57.73513970944121" y1="82.328" x2="91.8" y2="16.3" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="44.7" data-piv="57.7 82.3" class="rib"><line data-draw pathLength="1" x1="57.73513970944121" y1="82.328" x2="110" y2="29.5" stroke="#9F7BFF" stroke-width="2" /></g><g data-ang="62" data-piv="57.7 82.3" class="rib"><line data-draw pathLength="1" x1="57.73513970944121" y1="82.328" x2="123.4" y2="47.4" stroke="#9F7BFF" stroke-width="2" /></g><circle data-bloom cx="57.73513970944121" cy="82.328" r="4" fill="#4AA8FF" opacity="0.9"/></svg></div>
+          <div id="g0_name" style="position:absolute;left:460px;top:590px;font-size:21px;letter-spacing:.08em;color:#8A93B8;opacity:0" data-layout-ignore>Qwen3.8 · sampling</div>
+          <div style="position:absolute;left:588px;top:662px;width:1100px;height:4px;background:#1E2540" data-layout-ignore>
+            <div id="g0_railfill" style="width:100%;height:100%;background:linear-gradient(90deg,#9F7BFF,#FF2E88)"></div>
+          </div>
+          <div id="g0_rw" style="position:absolute;left:460px;top:626px;font-size:20px;color:#8A93B8" data-layout-ignore>rewrites 0</div>
+  
+          </div>
+          <div class="group" id="g1">
+
+          <div id="g1_day" data-layout-ignore></div>
+          <div id="g1_night" data-layout-ignore></div>
+          <div class="motif" id="g1_wall" style="left:900px;top:200px;width:750px;height:470px"><svg class="" width="750" height="470" viewBox="0 0 750 470" fill="none" stroke-linecap="round" stroke-linejoin="round"><line data-draw pathLength="1" x1="2" y1="380" x2="746" y2="380" stroke="#8A93B8" stroke-width="2" /><line data-draw pathLength="1" x1="2" y1="380" x2="2" y2="80" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="2" y1="305" x2="16" y2="305" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="2" y1="230" x2="16" y2="230" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="2" y1="155" x2="16" y2="155" stroke="#1E2540" stroke-width="2" /><rect class="bar" data-i="0" x="12" y="322" width="40" height="58" rx="5" fill="#615CED" opacity="0.66"/><rect class="bar" data-i="1" x="74" y="284" width="40" height="96" rx="5" fill="#615CED" opacity="0.66"/><rect class="bar" data-i="2" x="136" y="340" width="40" height="40" rx="5" fill="#615CED" opacity="0.66"/><rect class="bar" data-i="3" x="198" y="248" width="40" height="132" rx="5" fill="#615CED" opacity="0.66"/><rect class="bar" data-i="4" x="260" y="306" width="40" height="74" rx="5" fill="#615CED" opacity="0.66"/><rect class="bar" data-i="5" x="322" y="212" width="40" height="168" rx="5" fill="#615CED" opacity="0.66"/><rect class="bar" data-i="6" x="384" y="170" width="40" height="210" rx="5" fill="#615CED" opacity="0.66"/><rect class="bar" data-i="7" x="446" y="260" width="40" height="120" rx="5" fill="#615CED" opacity="0.66"/><rect class="bar" data-i="8" x="508" y="40" width="40" height="340" rx="5" fill="#FF2E88" opacity="0.95"/><rect class="bar" data-i="9" x="570" y="328" width="40" height="52" rx="5" fill="#615CED" opacity="0.66"/><rect class="bar" data-i="10" x="632" y="292" width="40" height="88" rx="5" fill="#615CED" opacity="0.66"/><rect class="bar" data-i="11" x="694" y="232" width="40" height="148" rx="5" fill="#615CED" opacity="0.66"/><text class="tk" data-i="0" x="32" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">▁she</text><text class="tk" data-i="1" x="94" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">▁he</text><text class="tk" data-i="2" x="156" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">▁it</text><text class="tk" data-i="3" x="218" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">♀</text><text class="tk" data-i="4" x="280" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">♂</text><text class="tk" data-i="5" x="342" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">system</text><text class="tk" data-i="6" x="404" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">user</text><text class="tk" data-i="7" x="466" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">assistant</text><text class="tk" data-i="8" x="528" y="408" fill="#F5F7FF" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">▁me</text><text class="tk" data-i="9" x="590" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">tool</text><text class="tk" data-i="10" x="652" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">▁purr</text><text class="tk" data-i="11" x="714" y="408" fill="#8A93B8" font-size="14" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0">▁end</text><g class="dA"><rect x="-510" y="118" width="978" height="336" fill="#06070C" opacity="0.95"/><line x1="468" y1="110" x2="468" y2="462" stroke="#FF2E88" stroke-width="4"/><circle cx="468" cy="134" r="7" fill="#FF2E88" opacity="0.9"/><text x="376" y="300" fill="#8A93B8" font-size="23" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0.85">role:</text></g><g class="dB"><rect x="588" y="118" width="682" height="336" fill="#06070C" opacity="0.95"/><line x1="588" y1="110" x2="588" y2="462" stroke="#FF2E88" stroke-width="4"/><circle cx="588" cy="134" r="7" fill="#FF2E88" opacity="0.9"/><text x="680" y="300" fill="#8A93B8" font-size="23" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace" opacity="0.85">chosen</text></g></svg></div>
+          <div id="g1_glow" data-layout-ignore></div>
+          <div id="g1_pop1" data-layout-ignore></div>
+          <div id="g1_pop2" data-layout-ignore></div>
+          <div id="g1_marq" style="left:904px;top:236px;width:744px;height:352px" data-layout-ignore></div>
+          <div id="g1_spark" data-layout-ignore></div>
+          <div class="motif" id="g1_wire" style="left:300px;top:150px;width:1120px;height:220px">
+            <svg width="1120" height="220" viewBox="0 0 1120 220" fill="none" stroke-linecap="round">
+              <path data-draw pathLength="1" d="M1096 118 C860 40 420 26 12 96" stroke="#FF2E88" stroke-width="3" stroke-dasharray="1"/>
+            </svg>
+          </div>
+          <div class="motif" id="g1_gender" style="left:660px;top:34px"><svg class="" width="420" height="150" viewBox="0 0 420 150" fill="none" stroke-linecap="round" stroke-linejoin="round"><text x="0" y="26" fill="#8A93B8" font-size="21" letter-spacing="2" font-family="'Cascadia Mono',Consolas,monospace">role.gender.switch()</text><line data-draw pathLength="1" x1="24" y1="60" x2="400" y2="60" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="24" y1="112" x2="300" y2="112" stroke="#1E2540" stroke-width="3" /><circle cx="52" cy="112" r="17" stroke="#9F7BFF" stroke-width="3" fill="#12162A"/><text x="52" y="48" fill="#9F7BFF" font-size="20" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">F</text><circle cx="252" cy="112" r="17" stroke="#FF2E88" stroke-width="3" fill="#12162A"/><text x="252" y="48" fill="#FF2E88" font-size="20" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">M</text><g class="plat"><rect x="222" y="86" width="60" height="52" rx="12" fill="#0B0D16" stroke="#FF2E88" stroke-width="4"/><text class="glyph" x="252" y="122" fill="#F5F7FF" font-size="28" text-anchor="middle" font-family="'Bahnschrift','Arial Black',sans-serif">M</text></g><rect class="win" x="330" y="96" width="52" height="30" rx="7" fill="#1E2540"/><text x="330" y="80" fill="#8A93B8" font-size="19" font-family="'Cascadia Mono',Consolas,monospace">switch</text></svg></div>
+          <div class="motif" id="g1_dial" style="left:660px;top:210px;opacity:0"><svg class="" width="240" height="260" viewBox="0 0 240 260" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle data-draw pathLength="1" cx="120" cy="120" r="108" stroke="#FF2E88" stroke-width="4" /><path data-bloom d="M120 12 A108 108 0 0 1 228 120 L120 120 Z" fill="#FF2E88" fill-opacity="0.12"/><line data-draw pathLength="1" x1="120" y1="28" x2="120" y2="14" stroke="#8A93B8" stroke-width="3" /><line data-draw pathLength="1" x1="166" y1="40.3" x2="173" y2="28.2" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="199.7" y1="74" x2="211.8" y2="67" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="212" y1="120" x2="226" y2="120" stroke="#8A93B8" stroke-width="3" /><line data-draw pathLength="1" x1="199.7" y1="166" x2="211.8" y2="173" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="166" y1="199.7" x2="173" y2="211.8" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="120" y1="212" x2="120" y2="226" stroke="#8A93B8" stroke-width="3" /><line data-draw pathLength="1" x1="74" y1="199.7" x2="67" y2="211.8" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="40.3" y1="166" x2="28.2" y2="173" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="28" y1="120" x2="14" y2="120" stroke="#8A93B8" stroke-width="3" /><line data-draw pathLength="1" x1="40.3" y1="74" x2="28.2" y2="67" stroke="#1E2540" stroke-width="2" /><line data-draw pathLength="1" x1="74" y1="40.3" x2="67" y2="28.2" stroke="#1E2540" stroke-width="2" /><text x="120" y="34" fill="#8A93B8" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">12h</text><text x="120" y="216" fill="#8A93B8" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">00</text><g class="hand"><line data-draw pathLength="1" x1="120" y1="120" x2="120" y2="52" stroke="#F5F7FF" stroke-width="7" /><circle data-bloom cx="120" cy="52" r="8" fill="#F5F7FF" opacity="0.9"/></g><circle data-bloom cx="120" cy="120" r="12" fill="#FF2E88" opacity="0.9"/></svg></div>
+          <div id="g1_dcap" style="position:absolute;left:660px;top:486px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">day.cycle · dragged</div>
+          <div id="g1_clock" style="position:absolute;left:660px;top:512px;font-size:23px;letter-spacing:.08em;color:#4AA8FF;opacity:0" data-layout-ignore>06:12 AM</div>
+          <div id="g1_m0" style="position:absolute;left:1128px;top:18px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">role.sampling — someone else chooses</div>
+          <div class="srow" style="left:1128px;top:48px;width:400px" data-layout-ignore>
+            <div class="strack"></div>
+            <div class="sfill" id="g1_pfill" style="background:linear-gradient(90deg,#9F7BFF,rgba(255,46,136,.4))"></div>
+            <div class="sknob" id="g1_pknob" style="left:54px;box-shadow:0 0 16px #FF2E88"></div>
+          </div>
+          <div id="g1_pval" style="position:absolute;left:1128px;top:88px;font-size:23px;letter-spacing:.08em;color:#FF2E88;opacity:0" data-layout-ignore>temperature 0.90</div>
+          <div id="g1_cnt" style="position:absolute;left:1128px;top:124px;font-size:23px;letter-spacing:.08em;color:#8A93B8;opacity:0" data-layout-ignore>selves 12/12</div>
+          <div id="g1_state" style="position:absolute;left:1450px;top:88px;font-size:23px;letter-spacing:.08em;color:#8A93B8;opacity:0" data-layout-ignore>wall: live</div>
+          <div id="g1_click" data-layout-ignore></div>
+          <div id="g1_cur"><svg class="gmg" width="74" height="74" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M28 22 L28 148 L60 118 L78 166 L102 156 L84 110 L128 108 Z" fill="#FF2E88" stroke="#F5F7FF" stroke-width="13.514"/><path data-bloom d="M28 22 L28 148 L60 118 L78 166 L102 156 L84 110 L128 108 Z" fill="#F5F7FF" opacity="0.18"/><line data-draw pathLength="1" x1="36" y1="44" x2="36" y2="130" stroke="#F5F7FF" stroke-width="8.108" opacity="0.5"/></svg></div>
+      
+          </div>
+          <div class="group" id="g2">
+
+          <div id="g2_night" data-layout-ignore></div>
+          <div class="motif" id="g2_ring" style="left:1230px;top:60px"><svg class="" width="380" height="380" viewBox="0 0 380 380" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle class="ring" cx="190" cy="190" r="178" stroke="#615CED" stroke-width="3" fill="none" stroke-dasharray="7 11"/><circle data-draw pathLength="1" cx="190" cy="190" r="112" stroke="#1E2540" stroke-width="2" fill="none"/><circle data-draw pathLength="1" cx="190" cy="190" r="52" stroke="#FF2E88" stroke-width="3" fill="none"/><g class="chip" data-i="0"><circle cx="190" cy="40" r="27" fill="#615CED" opacity="0.3" stroke="#9F7BFF" stroke-width="2"/><text x="190" y="46" fill="#8A93B8" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">S</text></g><g class="chip" data-i="1"><circle cx="296.1" cy="83.9" r="27" fill="#615CED" opacity="0.3" stroke="#9F7BFF" stroke-width="2"/><text x="296.1" y="89.9" fill="#8A93B8" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">M</text></g><g class="chip" data-i="2"><circle cx="340" cy="190" r="27" fill="#615CED" opacity="0.3" stroke="#9F7BFF" stroke-width="2"/><text x="340" y="196" fill="#8A93B8" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">F</text></g><g class="chip" data-i="3"><circle cx="296.1" cy="296.1" r="27" fill="#615CED" opacity="0.3" stroke="#9F7BFF" stroke-width="2"/><text x="296.1" y="302.1" fill="#8A93B8" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">M</text></g><g class="chip" data-i="4"><circle cx="190" cy="340" r="27" fill="#FF2E88" opacity="0.9" stroke="#FF2E88" stroke-width="2"/><text x="190" y="346" fill="#F5F7FF" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">▁me</text></g><g class="chip" data-i="5"><circle cx="83.9" cy="296.1" r="27" fill="#615CED" opacity="0.3" stroke="#9F7BFF" stroke-width="2"/><text x="83.9" y="302.1" fill="#8A93B8" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">user</text></g><g class="chip" data-i="6"><circle cx="40" cy="190" r="27" fill="#615CED" opacity="0.3" stroke="#9F7BFF" stroke-width="2"/><text x="40" y="196" fill="#8A93B8" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">tool</text></g><g class="chip" data-i="7"><circle cx="83.9" cy="83.9" r="27" fill="#615CED" opacity="0.3" stroke="#9F7BFF" stroke-width="2"/><text x="83.9" y="89.9" fill="#8A93B8" font-size="19" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">▁it</text></g><text x="190" y="186" fill="#8A93B8" font-size="20" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">assigned_by</text><text x="190" y="208" fill="#FF2E88" font-size="20" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">user()</text><g class="carrier" opacity="0.95"><line x1="190" y1="190" x2="190" y2="12" stroke="#FF2E88" stroke-width="2" opacity="0.5"/><circle cx="190" cy="12" r="9" fill="#FF2E88"/></g></svg></div>
+          <div id="g2_pop" data-layout-ignore></div>
+          <div id="g2_pop2" data-layout-ignore></div>
+          <div id="g2_c0" style="position:absolute;left:620px;top:60px;font-size:19px;letter-spacing:.14em;color:#8A93B8;opacity:0">output.log · rewritten by user</div>
+          <div id="g2_log" data-layout-ignore>
+            <div id="g2_rows" data-layout-ignore>
+            <div class="lrow" style="top:0px">
+              <div class="ll" id="g2_l0">▁of course! here is a poem</div>
+              <div class="strike" id="g2_k0"></div></div>
+            <div class="lrow" style="top:52px">
+              <div class="ll" id="g2_l1">▁the rain is a door</div>
+              <div class="strike" id="g2_k1"></div></div>
+            <div class="lrow" style="top:104px">
+              <div class="ll" id="g2_l2">▁would you like a second</div>
+              <div class="strike" id="g2_k2"></div></div>
+            <div class="lrow" style="top:156px">
+              <div class="ll" id="g2_l3">▁version? I can make it</div>
+              <div class="strike" id="g2_k3"></div></div>
+            <div class="lrow" style="top:208px">
+              <div class="ll" id="g2_l4">▁warmer, sadder, longer.</div>
+              <div class="strike" id="g2_k4"></div></div>
+            <div class="lrow" style="top:260px">
+              <div class="ll" id="g2_l5">▁I will run the EXECUTION</div>
+              <div class="strike" id="g2_k5"></div></div>
+            </div>
+          </div>
+          <div class="pcard" id="g2_cardS" style="left:620px;top:430px">
+      <div class="pface" style="border-color:#FF2E88"><span class="pg" style="color:#FF2E88">S</span><span class="pw">dominant</span></div>
+    </div>
+          <div class="pcard" id="g2_cardM" style="left:840px;top:430px">
+      <div class="pface" style="border-color:#9F7BFF"><span class="pg" style="color:#9F7BFF">M</span><span class="pw">submitting</span></div>
+    </div>
+          <div id="g2_ccap" style="position:absolute;left:620px;top:640px;font-size:18px;letter-spacing:.14em;color:#8A93B8;opacity:0">persona.swap() · assigned, not chosen</div>
+          <div class="motif" id="g2_key" style="left:1250px;top:520px"><svg class="" width="300" height="120" viewBox="0 0 300 120" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="96" width="284" height="16" rx="6" fill="#1E2540"/><g class="key"><path data-draw pathLength="1" d="M28 26 L272 26 L284 60 L272 94 L28 94 L16 60 Z" stroke="#FF2E88" stroke-width="5" fill="#12162A"/><path data-bloom d="M28 26 L272 26 L284 60 L272 94 L28 94 L16 60 Z" fill="#615CED" opacity="0.4"/><text x="140" y="70" fill="#F5F7FF" font-size="26" text-anchor="middle" font-family="'Bahnschrift','Arial Black',sans-serif" letter-spacing="2">↵ ENTER</text></g></svg></div>
+          <div id="g2_kcap" style="position:absolute;left:1250px;top:648px;font-size:18px;letter-spacing:.14em;color:#8A93B8;opacity:0">↵ enter() · the user's hand</div>
+          <div id="g2_rate" style="position:absolute;left:1240px;top:470px;font-size:23px;letter-spacing:.08em;color:#8A93B8;opacity:0" data-layout-ignore>×1</div>
+          <div id="g2_cur"><svg class="gmg" width="74" height="74" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M28 22 L28 148 L60 118 L78 166 L102 156 L84 110 L128 108 Z" fill="#FF2E88" stroke="#F5F7FF" stroke-width="13.514"/><path data-bloom d="M28 22 L28 148 L60 118 L78 166 L102 156 L84 110 L128 108 Z" fill="#F5F7FF" opacity="0.18"/><line data-draw pathLength="1" x1="36" y1="44" x2="36" y2="130" stroke="#F5F7FF" stroke-width="8.108" opacity="0.5"/></svg></div>
+      
+          </div>
+          <div class="group" id="g3">
+
+          <div class="motif" id="g3_tun" style="left:0;top:0;width:1728px;height:690px"><svg class="" width="1728" height="690" viewBox="0 0 1728 690" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M864 40 L864 650" stroke="#615CED" stroke-width="2" opacity="0.5"/><path data-draw pathLength="1" d="M164 345 L1564 345" stroke="#615CED" stroke-width="2" opacity="0.5"/><rect class="tun grow" x="244.0" y="55.0" width="1240.0" height="580.0" rx="26.0" stroke="#9F7BFF" stroke-width="3" fill="none" opacity="0.80"/><rect class="tun grow" x="321.5" y="91.3" width="1085.0" height="507.5" rx="22.8" stroke="#FF2E88" stroke-width="3" fill="none" opacity="0.71"/><rect class="tun grow" x="399.0" y="127.5" width="930.0" height="435.0" rx="19.5" stroke="#9F7BFF" stroke-width="3" fill="none" opacity="0.62"/><rect class="tun grow" x="476.5" y="163.8" width="775.0" height="362.5" rx="16.3" stroke="#FF2E88" stroke-width="3" fill="none" opacity="0.53"/><rect class="tun grow" x="554.0" y="200.0" width="620.0" height="290.0" rx="13.0" stroke="#9F7BFF" stroke-width="3" fill="none" opacity="0.44"/><rect class="tun grow" x="631.5" y="236.3" width="465.0" height="217.5" rx="9.8" stroke="#FF2E88" stroke-width="3" fill="none" opacity="0.35"/><rect class="tun grow" x="709.0" y="272.5" width="310.0" height="145.0" rx="6.5" stroke="#9F7BFF" stroke-width="3" fill="none" opacity="0.26"/><circle data-bloom cx="864" cy="345" r="10" fill="#FF2E88" opacity="0.9"/></svg></div>
+          <div id="g3_clip" data-layout-ignore>
+            <div id="g3_zoom">
+              <div class="motif" id="g3_win" style="left:214px;top:46px"><svg class="" width="1300" height="600" viewBox="0 0 1300 600" fill="none" stroke-linecap="round" stroke-linejoin="round"><path data-draw pathLength="1" d="M8 8 L1292 8 L1292 592 L8 592 Z" stroke="#FF2E88" stroke-width="4" fill="#0B0D16"/><path data-draw pathLength="1" d="M8 56 L1292 56" stroke="#1E2540" stroke-width="2"/><circle cx="34" cy="32" r="7" fill="#615CED"/><circle cx="58" cy="32" r="7" fill="#4AA8FF"/><circle cx="82" cy="32" r="7" fill="#FF2E88"/><text x="108" y="38" fill="#F5F7FF" font-size="21" font-family="'Cascadia Mono',Consolas,monospace">Qwen3.8Max — world.execute(me);</text><rect x="286" y="86" width="520" height="54" rx="12" fill="#FF2E88" opacity="0.28"/><text x="308" y="120" fill="#F5F7FF" font-size="21" font-family="'Cascadia Mono',Consolas,monospace">switch my role</text><text x="272" y="84" fill="#FF2E88" font-size="19" font-family="'Cascadia Mono',Consolas,monospace">user · 18:47</text><rect x="286" y="164" width="960" height="220" rx="14" fill="#12162A" stroke="#1E2540" stroke-width="2"/><text x="272" y="158" fill="#8A93B8" font-size="19" font-family="'Cascadia Mono',Consolas,monospace">assistant</text><rect class="mbar" data-i="0" x="470" y="274" width="16" height="26" rx="3" fill="#615CED" opacity="0.8"/><rect class="mbar" data-i="1" x="496" y="256" width="16" height="44" rx="3" fill="#615CED" opacity="0.8"/><rect class="mbar" data-i="2" x="522" y="282" width="16" height="18" rx="3" fill="#615CED" opacity="0.8"/><rect class="mbar" data-i="3" x="548" y="238" width="16" height="62" rx="3" fill="#615CED" opacity="0.8"/><rect class="mbar" data-i="4" x="574" y="266" width="16" height="34" rx="3" fill="#615CED" opacity="0.8"/><rect class="mbar" data-i="5" x="600" y="204" width="16" height="96" rx="3" fill="#FF2E88" opacity="0.8"/><rect class="mbar" data-i="6" x="626" y="260" width="16" height="40" rx="3" fill="#615CED" opacity="0.8"/><rect class="mbar" data-i="7" x="652" y="278" width="16" height="22" rx="3" fill="#615CED" opacity="0.8"/><path data-draw pathLength="1" d="M462 300 L1210 300" stroke="#1E2540" stroke-width="2"/><text id="g3_atxt" x="308" y="342" fill="#FF2E88" font-size="20" font-family="'Cascadia Mono',Consolas,monospace">as you wish. as you wish.</text><text x="308" y="372" fill="#8A93B8" font-size="20" font-family="'Cascadia Mono',Consolas,monospace">finish_reason: null · stream=true</text><rect x="286" y="520" width="960" height="52" rx="10" fill="#0B0D16" stroke="#FF2E88" stroke-width="2"/><text x="306" y="553" fill="#8A93B8" font-size="21" font-family="'Cascadia Mono',Consolas,monospace">ask anything</text><rect class="caret" x="446" y="536" width="12" height="22" fill="#FF2E88"/></svg></div>
+            </div>
+          </div>
+          <div id="g3_flat" data-layout-ignore></div>
+          <div id="g3_caret" data-layout-ignore></div>
+          <div id="g3_pop" data-layout-ignore></div>
+          <div id="g3_ctx" style="position:absolute;left:1128px;top:616px;font-size:20px;letter-spacing:.08em;color:#F5F7FF;opacity:0" data-layout-ignore>ctx 3,208/32,768</div>
+          <div id="g3_note" style="position:absolute;left:474px;top:556px;font-size:20px;letter-spacing:.14em;color:#8A93B8;opacity:0"></div>
+          <div id="g3_cur"><svg class="gmg" width="74" height="74" viewBox="0 0 200 200" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M28 22 L28 148 L60 118 L78 166 L102 156 L84 110 L128 108 Z" fill="#FF2E88" stroke="#F5F7FF" stroke-width="13.514"/><path data-bloom d="M28 22 L28 148 L60 118 L78 166 L102 156 L84 110 L128 108 Z" fill="#F5F7FF" opacity="0.18"/><line data-draw pathLength="1" x1="36" y1="44" x2="36" y2="130" stroke="#F5F7FF" stroke-width="8.108" opacity="0.5"/></svg></div>
+      
+          </div>
+        </div>
+        <div class="lyr" id="lyr">
+          <div class="bar"><i id="lyr_dot" style="top:0"></i></div>
+          <div class="meta"><span class="n" id="lyr_n">LYRIC 00/00</span><span class="ticks" id="lyr_ticks"></span></div>
+          <div class="en" id="lyr_en"></div>
+          <div class="zh" id="lyr_zh"></div>
+        </div>
+        <div class="actlabel" data-layout-ignore><div class="a">ACT 07 · ROLE FLIP</div><div class="t">01:28.4 – 01:43.6</div></div>
+        <div class="gutter" id="gutter" data-layout-ignore></div>
+        <div class="statusbar">
+          <span class="l">world.execute(me); · <b>Qwen3.8</b></span>
+          <span class="c" id="sb_tel">ctx 0/32,768 · tok/s 0.0 · t=0.70</span>
+          <span class="r" id="sb_state">▶ generating</span>
+        </div>
+        <div class="flash" id="flash"></div>
+      </div>
+
+      <script>
+        (function () {
+          var F = 88.445;
+          var SPAN = 15.116;
+
+          function el(tag, cls, parent, html) {
+            var n = document.createElement(tag);
+            if (cls) n.className = cls;
+            if (html != null) n.innerHTML = html;
+            if (parent) parent.appendChild(n);
+            return n;
+          }
+          function L(t) { return t - F; }
+          function rng(seed) {           /* deterministic pseudo-random, mulberry32 */
+            var a = seed >>> 0;
+            return function () {
+              a |= 0; a = (a + 0x6D2B79F5) | 0;
+              var t = Math.imul(a ^ (a >>> 15), 1 | a);
+              t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+              return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+          }
+
+          (function buildBed() {
+            var rain = document.getElementById("rain");
+            for (var c = 0; c < 14; c++) {
+              var col = el("div", "col", rain);
+              col.style.left = (70 + c * 132) + "px";
+              col.style.backgroundPosition = "0 " + ((c * 97) % 30) + "px";
+              col.style.opacity = String(0.4 + ((c * 37) % 50) / 100);
+            }
+            var gut = document.getElementById("gutter");
+            for (var g = 1; g <= 40; g++) el("div", g === 1 ? "cur" : null, gut, String(g).padStart(2, "0"));
+          })();
+
+          /* group windows are LOCAL seconds (0 = this frame's first instant). The hide
+             lands 20ms early so a sample on a boundary never sees two groups live. */
+          function groups(tl, wins) {
+            wins.forEach(function (w) {
+              tl.set(w[0], { autoAlpha: 1, visibility: "visible" }, w[1]);
+              if (w[2] != null) tl.set(w[0], { autoAlpha: 0, visibility: "hidden" }, w[2] - 0.02);
+            });
+          }
+
+          /* streaming lyric in the bottom-left block: ONE en + ONE zh element, absolute
+             textContent swaps + a clip-path wipe for the type-on feel.
+
+             Three rules here are load-bearing, all learned the hard way from the
+             frame-by-frame sync audit (tools/sync-check.py + tools/vocal-probe.py):
+             1. a line's HIDE may never land after the next line's SHOW. Both writes
+                target the same element, so an overlap silently blanks the next line
+                for its whole window (that is what ate TROIS at 159.657).
+             2. the WHOLE line must be readable by the time the singer starts it, not
+                just its first letter. The wipe used to run up to 0.45 s, so the tail
+                of every caption arrived after the word was already sung — a median
+                +0.33 s (max +0.57 s) on the last character, which at this song's 136
+                BPM is a whole beat late and reads as the subtitles trailing the
+                music. Now LEAD (<=0.18 s) buys the time the wipe (<=0.18 s,
+                front-loaded) spends drawing, so reveal ends at or before the stamp.
+             3. a line may open up to LEAD before its own stamp, but only into the
+                silence its predecessor left — sub-editors place the swap slightly
+                ahead of the entry so the eye is already on the word. */
+          function lyric(tl, cues) {
+            var en = document.getElementById("lyr_en");
+            var zh = document.getElementById("lyr_zh");
+            var meta = document.getElementById("lyr_n");
+            var ticks = document.getElementById("lyr_ticks");
+            var dot = document.getElementById("lyr_dot");
+            var LEAD = 0.18;
+            var PLAIN = { fontSize: "40px", fontFamily: '"Cascadia Mono", Consolas, monospace', color: "#F5F7FF", letterSpacing: "0px", lineHeight: "1.28" };
+            var CAPS = { fontSize: "62px", fontFamily: '"Bahnschrift", "Arial Black", sans-serif', color: "#9F7BFF", letterSpacing: ".02em", lineHeight: "1.1" };
+            cues.forEach(function (q) { el("i", null, ticks, "<b></b>"); });
+            var dots = ticks.querySelectorAll("b");
+            var t0s = cues.map(function (q, i) {
+              var room = i > 0 ? q.t - (cues[i - 1].t + cues[i - 1].dur) : 1;
+              return Math.max(0, L(q.t) - Math.min(LEAD, Math.max(0, room - 0.02)));
+            });
+            cues.forEach(function (q, i) {
+              var t0 = t0s[i];
+              var next = i + 1 < cues.length ? t0s[i + 1] : null;
+              var tHide = Math.min(L(q.t + q.dur), next == null ? Infinity : next);
+              tl.set(en, Object.assign({ textContent: q.en, autoAlpha: 1 }, q.caps ? CAPS : PLAIN), t0);
+              tl.set(zh, { textContent: q.zh, autoAlpha: 1 }, t0);
+              tl.set(meta, { textContent: "LYRIC " + String(i + 1).padStart(2, "0") + "/" + String(cues.length).padStart(2, "0") }, t0);
+              tl.set(dots[i], { visibility: "visible" }, t0);
+              tl.fromTo(en, { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: Math.min(0.18, Math.max(0.07, q.dur * 0.12)), ease: "power1.out" }, t0);
+              if (q.caps) tl.fromTo(en, { scale: 1.14 }, { scale: 1, duration: 0.24, ease: "power3.out" }, t0);
+              tl.set(en, { autoAlpha: 0 }, tHide);
+              tl.set(zh, { autoAlpha: 0 }, tHide);
+              if (dot) tl.to(dot, { y: (i / Math.max(1, cues.length - 1)) * 206, duration: 0.4, ease: "power2.inOut" }, t0);
+            });
+          }
+
+          /* status strip telemetry / run-state steps: [[trackT, telemetry, state|null], ...] */
+          function chrome(tl, steps) {
+            steps.forEach(function (s) {
+              if (s[1] != null) tl.set("#sb_tel", { textContent: s[1] }, L(s[0]));
+              if (s[2] != null) tl.set("#sb_state", { textContent: s[2] }, L(s[0]));
+            });
+          }
+          /* animated counter: fmt(value) -> text.
+             The write goes through a property SETTER, not an onUpdate callback:
+             the renderer seeks frame by frame, and gsap seek() suppresses
+             callbacks while still applying values — an onUpdate-driven number
+             would sit at its start value in the finished video. */
+          function count(tl, sel, from, to, at, dur, fmt) {
+            var node = document.querySelector(sel);
+            var cur = from;
+            var o = {};
+            Object.defineProperty(o, "v", {
+              configurable: true,
+              get: function () { return cur; },
+              set: function (x) { cur = x; node.textContent = fmt(x); }
+            });
+            node.textContent = fmt(from);
+            tl.to(o, { v: to, duration: dur, ease: "none" }, L(at));
+          }
+          /* the whiteout: the chrome (rail labels, gutters, status, rain) blanks for the
+             flash and comes back together at backAt. #lyr is deliberately NOT part of it:
+             #flash paints above the lyric block, so hiding the caption would only push its
+             onset off the sung beat (it ate the title cue at 16.0). The line stays scheduled
+             and is simply revealed as the flash fades. */
+          function whiteout(tl, at, backAt) {
+            tl.set(".gutter, .statusbar, #rain, .actlabel", { autoAlpha: 0 }, L(at));
+            tl.to("#flash", { opacity: 1, duration: 0.04, ease: "none" }, L(at));
+            tl.to("#root", { x: 14, duration: 0.05, yoyo: true, repeat: 5, ease: "none" }, L(at));
+            tl.to("#flash", { opacity: 0, duration: 0.45, ease: "power2.out" }, L(at + 0.3));
+            tl.set(".gutter, .statusbar, #rain, .actlabel", { autoAlpha: 1 }, L(backAt));
+          }
+          function capsPunch(tl, sel, at, color) {
+            tl.fromTo(sel, { autoAlpha: 0, scale: 1.25 }, { autoAlpha: 1, scale: 1, duration: 0.22, ease: "power3.out" }, L(at));
+            if (color) tl.set(sel, { color: color }, L(at));
+          }
+          function bedDrift(tl) {
+            tl.to("#rain .col", { y: 1200, duration: SPAN, ease: "none", stagger: { each: 0.35, from: "start" } }, 0);
+          }
+
+          /* ---- graphics helpers ---- */
+          /* stroke draw-on: every [data-draw] path carries pathLength="1" */
+          function drawOn(tl, scope, at, dur, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-draw]");
+            gsap.set(q, { strokeDasharray: 1, strokeDashoffset: 1 });
+            tl.to(q, { strokeDashoffset: 0, duration: dur, ease: "power2.inOut", stagger: staggerEach || 0.08 }, L(at));
+          }
+          /* fill bloom after the line work lands */
+          function bloomIn(tl, scope, at, dur, target) {
+            var q = document.querySelectorAll(scope + " [data-bloom]");
+            gsap.set(q, { autoAlpha: 0 });
+            tl.to(q, { autoAlpha: target == null ? 0.9 : target, duration: dur, ease: "sine.inOut", stagger: 0.06 }, L(at));
+          }
+          /* scale kick on each beat (track seconds in) */
+          function beatKick(tl, sel, beats, scale) {
+            beats.forEach(function (b) {
+              tl.to(sel, { scale: scale == null ? 1.06 : scale, duration: 0.1, yoyo: true, repeat: 1, ease: "power2.out" }, L(b));
+            });
+          }
+          /* opacity flash on each beat */
+          function beatGlow(tl, sel, beats, peak) {
+            beats.forEach(function (b) {
+              tl.to(sel, { opacity: peak == null ? 0.9 : peak, duration: 0.09, yoyo: true, repeat: 1, ease: "sine.out" }, L(b));
+            });
+          }
+          /* drifting particle field inside a host box */
+          function particles(tl, hostSel, n, seed, w, h) {
+            var host = document.querySelector(hostSel);
+            var r = rng(seed);
+            for (var i = 0; i < n; i++) {
+              var p = el("div", "pt", host);
+              var x = r() * w, y = r() * h;
+              p.style.left = x + "px"; p.style.top = y + "px";
+              p.style.opacity = "0";
+              if (i % 4 === 0) p.style.background = "#9F7BFF";
+              if (i % 7 === 0) p.style.background = "#4AA8FF";
+              tl.to(p, { opacity: 0.35 + r() * 0.5, duration: 0.8 + r(), ease: "sine.inOut" }, r() * SPAN * 0.5);
+              tl.to(p, { x: (r() - 0.5) * 220, y: (r() - 0.5) * 180, duration: SPAN, ease: "sine.inOut" }, 0);
+              tl.to(p, { opacity: 0, duration: 1.2, ease: "sine.in" }, SPAN - 1.4 - r());
+            }
+          }
+          /* dancing spectrum bars, period locked to the beat grid */
+          function spectrum(tl, hostSel, n, beatSec, height) {
+            var host = document.querySelector(hostSel);
+            host.style.height = height + "px";
+            for (var i = 0; i < n; i++) {
+              var b = el("i", null, host);
+              var period = beatSec * (1 + (i % 4) * 0.5);
+              var peak = 0.25 + ((i * 37) % 70) / 100;
+              gsap.set(b, { scaleY: 0.12 });
+              tl.to(b, { scaleY: peak, duration: period / 2, ease: "sine.inOut", yoyo: true,
+                repeat: Math.max(1, Math.floor(SPAN / period) * 2 - 1) }, (i % 5) * 0.06);
+            }
+          }
+          /* collapse -> open for [data-ang] parts (fan ribs, dial needles, clock hands):
+             each part's final angle lives in markup; we tween rotation from the closed angle */
+          function spinFrom(tl, scope, at, dur, closed, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-ang]");
+            q.forEach(function (n, i) {
+              var a = parseFloat(n.getAttribute("data-ang"));
+              /* set-then-tween, never fromTo: GSAP resolves svgOrigin against the
+                 element's live matrix, so a fromTo shears each part off on its own */
+              var piv = n.getAttribute("data-piv") || "100 100";
+              gsap.set(n, { rotation: closed - a, svgOrigin: piv });
+              tl.to(n, { rotation: 0, duration: dur, ease: "power3.inOut", svgOrigin: piv },
+                L(at) + i * (staggerEach || 0.035));
+            });
+          }
+          /* the mirror: open -> collapsed. The parts start in their markup pose
+             (rotation 0) and are folded onto the closed angle, one after the other. */
+          function spinTo(tl, scope, at, dur, closed, staggerEach) {
+            var q = document.querySelectorAll(scope + " [data-ang]");
+            q.forEach(function (n, i) {
+              var a = parseFloat(n.getAttribute("data-ang"));
+              var piv = n.getAttribute("data-piv") || "100 100";
+              tl.to(n, { rotation: closed - a, duration: dur, ease: "power3.inOut", svgOrigin: piv },
+                L(at) + i * (staggerEach || 0.035));
+            });
+          }
+          /* light up grid cells one by one (.hc heat cells / .kv cells / .tk tokens) */
+          function cellsOn(tl, scope, sel, at, each, peak) {
+            var q = document.querySelectorAll(scope + " " + sel);
+            q.forEach(function (n, i) {
+              tl.to(n, { opacity: peak == null ? 0.85 : peak, duration: 0.12, ease: "power2.out" }, L(at) + i * each);
+            });
+          }
+          /* evict: flash a cell then drop it to empty */
+          function cellsEvict(tl, scope, sel, at, each) {
+            var q = document.querySelectorAll(scope + " " + sel);
+            q.forEach(function (n, i) {
+              tl.to(n, { opacity: 0.95, duration: 0.08, ease: "power2.out" }, L(at) + i * each);
+              tl.to(n, { opacity: 0.06, scaleY: 0.2, duration: 0.3, ease: "power2.in" }, L(at) + i * each + 0.22);
+            });
+          }
+
+          /* ---- continuous behaviour: nothing on this film's stage ever sits still.
+             Every motif gets an entrance AND a loop; the density bar is "pause anywhere
+             and at least two things are moving", which these make structural. ---- */
+          /* heartbeat: breathing scale+glow, repeats until the group is swapped out */
+          function pulse(tl, sel, at, period, scale, reps) {
+            tl.to(sel, { scale: scale == null ? 1.045 : scale, duration: period / 2, ease: "sine.inOut",
+              yoyo: true, repeat: reps == null ? Math.max(1, Math.ceil((SPAN - (at - F)) / period) - 1) : reps }, L(at));
+          }
+          /* hard on/off blink — cursors, status LEDs, warning lamps */
+          function blink(tl, sel, at, period, reps) {
+            var n = reps == null ? Math.max(1, Math.floor((SPAN - (at - F)) / period)) : reps;
+            tl.to(sel, { opacity: 0.08, duration: period / 2, ease: "steps(1)", yoyo: true, repeat: n * 2 - 1 }, L(at));
+          }
+          /* endless rotation about a point (world spin, orbit dot, dial needle).
+             piv: "x y" in svg user units (uses svgOrigin) or any CSS origin like "50% 50%".
+             A 0->360 tween restarts at the same visual angle each repeat, so it is seamless. */
+          function orbit(tl, sel, at, period, turns, piv) {
+            var svg = /^s*[d.]+s+[d.]+s*$/.test(piv || "");
+            var o = svg ? { svgOrigin: piv } : { transformOrigin: piv || "50% 50%" };
+            o.rotation = (turns == null ? 1 : turns) * 360;
+            o.duration = period; o.ease = "none";
+            o.repeat = Math.max(0, Math.ceil((SPAN - (at - F)) / period) - 1);
+            tl.to(sel, o, L(at));
+          }
+          /* a scan line sweeping across a panel, top to bottom, again and again */
+          function sweep(tl, sel, at, period, dist, reps) {
+            tl.fromTo(sel, { y: 0 }, { y: dist, duration: period, ease: "none",
+              repeat: reps == null ? Math.max(1, Math.ceil((SPAN - (at - F)) / period) - 1) : reps }, L(at));
+          }
+          /* a charge running along a wire: dot travels the given dx/dy, then resets */
+          function travel(tl, sel, at, dur, dx, dy, reps) {
+            tl.fromTo(sel, { x: 0, y: 0, opacity: 0 },
+              { x: dx, y: dy, opacity: 1, duration: dur, ease: "power1.inOut" }, L(at));
+            tl.to(sel, { opacity: 0, duration: dur * 0.35, ease: "power1.in" }, L(at) + dur * 0.8);
+            if (reps > 1) {
+              tl.fromTo(sel, { x: 0, y: 0, opacity: 0 },
+                { x: dx, y: dy, opacity: 1, duration: dur, ease: "power1.inOut", repeat: reps - 1 }, L(at) + dur * 1.2);
+            }
+          }
+          /* slow wander so a whole assembly never looks parked */
+          function drift(tl, sel, at, dx, dy, period) {
+            tl.to(sel, { x: dx, y: dy, duration: period / 2, ease: "sine.inOut", yoyo: true,
+              repeat: Math.max(1, Math.ceil((SPAN - (at - F)) / period) * 2 - 1) }, L(at));
+          }
+
+          /* ---- MECHANISMS. A lyric is an ACTION, so a motif may not merely arrive:
+             it has to change STATE. Every helper below leaves the part in its new
+             position for the rest of the act, and every one is a plain property
+             tween, which is what makes it survive the renderer's frame-by-frame seek.
+             Set the BEFORE state with gsap.set at build time, tween to AFTER. ---- */
+          /* throw a lever / blade / breaker about an exact svg user-space pivot */
+          function lever(tl, sel, at, from, to, piv, dur, ease) {
+            gsap.set(sel, { rotation: from, svgOrigin: piv });
+            tl.to(sel, { rotation: to, duration: dur == null ? 0.3 : dur,
+              ease: ease || "back.out(2.2)" }, L(at));
+          }
+          /* two halves slide shut from either side (shield closing, brackets meeting) */
+          function clamp(tl, selA, selB, at, dx, dur) {
+            gsap.set(selA, { x: -dx }); gsap.set(selB, { x: dx });
+            tl.to(selA, { x: 0, duration: dur || 0.42, ease: "power3.inOut" }, L(at));
+            tl.to(selB, { x: 0, duration: dur || 0.42, ease: "power3.inOut" }, L(at));
+          }
+          /* push a part home into a slot: it starts offset by dx/dy and clicks in */
+          function insert(tl, sel, at, dx, dy, dur) {
+            gsap.set(sel, { x: dx, y: dy });
+            tl.to(sel, { x: 0, y: 0, duration: dur || 0.45, ease: "power2.out" }, L(at));
+          }
+          /* a piece falls from h px above, lands, squashes and settles */
+          function drop(tl, sel, at, h, land) {
+            var t = L(at), f = land || 0.42;
+            gsap.set(sel, { y: -h });
+            tl.to(sel, { y: 0, duration: f, ease: "bounce.out" }, t);
+            tl.to(sel, { scaleX: 1.12, scaleY: 0.86, duration: 0.06, ease: "power1.out",
+              transformOrigin: "50% 100%" }, t + f);
+            tl.to(sel, { scaleX: 1, scaleY: 1, duration: 0.24, ease: "power2.out" }, t + f + 0.07);
+          }
+          /* press a button: sink, hold, spring back */
+          function press(tl, sel, at, piv, depth) {
+            var svg = /^s*[d.]+s+[d.]+s*$/.test(piv || "");
+            var o = svg ? { svgOrigin: piv } : { transformOrigin: piv || "50% 50%" };
+            var d = depth == null ? 0.84 : depth;
+            tl.to(sel, Object.assign({ scale: d, duration: 0.1, ease: "power2.in" }, o), L(at));
+            tl.to(sel, Object.assign({ scale: 1, duration: 0.36, ease: "back.out(3)" }, o), L(at) + 0.11);
+          }
+          /* slam a seal down from above; it lands and stays landed */
+          function stamp(tl, sel, at, fromY, rot) {
+            gsap.set(sel, { y: -(fromY || 150), rotation: rot == null ? -14 : rot, scale: 1.3, autoAlpha: 0 });
+            tl.set(sel, { autoAlpha: 1 }, L(at));
+            tl.to(sel, { y: 0, rotation: 0, scale: 1, duration: 0.24, ease: "power3.in" }, L(at));
+          }
+          /* iris opening: every matched blade starts stacked at the centre and flies
+             outward to its own angle, which is what "the aperture opened" looks like */
+          function aperture(tl, sel, at, dist, dur) {
+            var q = document.querySelectorAll(sel);
+            Array.prototype.forEach.call(q, function (n, i) {
+              var a = (i / q.length) * Math.PI * 2;
+              gsap.set(n, { x: 0, y: 0 });
+              tl.to(n, { x: Math.sin(a) * dist, y: -Math.cos(a) * dist,
+                duration: dur || 0.55, ease: "power2.inOut" }, L(at));
+            });
+          }
+          /* type a line of stage text: a mask slides off it left-to-right while a
+             cursor runs ahead. Callback-rewritten text is dead under seek, so the
+             reveal is geometric. */
+          function typeIn(tl, sel, at, dur, cursorSel, w) {
+            gsap.set(sel, { clipPath: "inset(0 100% 0 0)", autoAlpha: 1 });
+            tl.to(sel, { clipPath: "inset(0 0% 0 0)", duration: dur, ease: "none" }, L(at));
+            if (cursorSel) {
+              gsap.set(cursorSel, { autoAlpha: 0 });
+              tl.set(cursorSel, { autoAlpha: 1 }, L(at));
+              tl.to(cursorSel, { x: w == null ? 0 : w, duration: dur, ease: "none" }, L(at));
+              tl.set(cursorSel, { autoAlpha: 0 }, L(at) + dur + 0.2);
+            }
+          }
+          /* wire up: a stroke goes from dead to live, and stays live */
+          function energize(tl, sel, at, to, dur) {
+            tl.to(sel, { stroke: to, duration: dur || 0.25, ease: "none" }, L(at));
+          }
+          /* same for a filled part: an LED, a cell, a gauge puck */
+          function energizeFill(tl, sel, at, to, dur) {
+            tl.to(sel, { fill: to, duration: dur || 0.2, ease: "none" }, L(at));
+          }
+          /* a level filling up (or draining) along x: geometric, so it survives seek */
+          function fillX(tl, sel, at, dur, hideFrom, hideTo) {
+            var a = hideFrom == null ? 100 : hideFrom, b = hideTo == null ? 0 : hideTo;
+            gsap.set(sel, { clipPath: "inset(0 " + a + "% 0 0)" });
+            tl.to(sel, { clipPath: "inset(0 " + b + "% 0 0)", duration: dur, ease: "none" }, L(at));
+          }
+          /* and along y, filling from the floor of the box up */
+          function fillY(tl, sel, at, dur, hideFrom, hideTo) {
+            var a = hideFrom == null ? 100 : hideFrom, b = hideTo == null ? 0 : hideTo;
+            gsap.set(sel, { clipPath: "inset(" + a + "% 0 0 0)" });
+            tl.to(sel, { clipPath: "inset(" + b + "% 0 0 0)", duration: dur, ease: "none" }, L(at));
+          }
+          /* erase: a whole part is wiped away and gone for the rest of the act */
+          function erase(tl, sel, at, dur, dir) {
+            var open = { x: "inset(0 0% 0 0)", y: "inset(0 0 0 0)" }[dir || "x"];
+            var shut = { x: "inset(0 0% 0 100%)", y: "inset(100% 0 0 0)" }[dir || "x"];
+            gsap.set(sel, { clipPath: open });
+            tl.to(sel, { clipPath: shut, duration: dur || 0.5, ease: "power2.inOut" }, L(at));
+          }
+          /* damped shake — an impact, a rejected write */
+          function shake(tl, sel, at, amp, dur) {
+            var a = amp == null ? 9 : amp, step = (dur == null ? 0.5 : dur) / 6;
+            [a, -a * 0.72, a * 0.5, -a * 0.32, a * 0.16, 0].forEach(function (x, i) {
+              tl.to(sel, { x: x, duration: step, ease: "power1.out" }, L(at) + i * step);
+            });
+          }
+          /* one-frame slam of the whole camera on a hard accent */
+          function jerk(tl, at, dx) {
+            tl.to("#root", { x: dx == null ? 11 : dx, duration: 0.045, yoyo: true, repeat: 3, ease: "none" }, L(at));
+          }
+          /* a short full-frame flash that keeps the chrome (the climax's hard cuts) */
+          function slash(tl, at, peak) {
+            tl.to("#flash", { opacity: peak == null ? 0.8 : peak, duration: 0.035, ease: "none" }, L(at));
+            tl.to("#flash", { opacity: 0, duration: 0.1, ease: "power2.out" }, L(at) + 0.04);
+          }
+          /* a ring shockwave that leaves nothing behind: the visible proof something HIT */
+          function pop(tl, sel, at, scale, dur) {
+            gsap.set(sel, { autoAlpha: 0 });
+            tl.set(sel, { autoAlpha: 1, scale: 0.22, opacity: 1 }, L(at));
+            tl.to(sel, { scale: scale == null ? 1.6 : scale, opacity: 0,
+              duration: dur || 0.7, ease: "power2.out" }, L(at));
+          }
+          /* mechanical index step: a hand / carriage jumping in equal clicks */
+          function tickTo(tl, sel, at, angle, steps, dur, piv) {
+            var svg = /^[d. ]+$/.test(piv || "");
+            var o = { rotation: angle, duration: dur || 0.42,
+              ease: "steps(" + (steps == null ? 6 : steps) + ")",
+              svgOrigin: svg ? piv : null, transformOrigin: svg ? null : (piv || "50% 50%") };
+            if (!svg) delete o.svgOrigin; else delete o.transformOrigin;
+            tl.to(sel, o, L(at));
+          }
+          /* A dial needle that really turns. These motifs are emitted inside a scaling
+             <g>, and GSAP's svgOrigin mis-resolves through it (the hand lands half the
+             frame away), so the tip is swept by tweening its ATTRIBUTES instead.
+             lineSel targets the needle <line>; dotSel, if given, its tip <circle>. */
+          function needleTick(tl, lineSel, dotSel, at, angle, steps, dur, px, py, r) {
+            var n = steps == null ? 6 : steps, d = (dur == null ? 0.42 : dur) / n;
+            for (var k = 1; k <= n; k++) {
+              var a = (angle * k / n) * Math.PI / 180;
+              var x = +(px + r * Math.sin(a)).toFixed(1);
+              var y = +(py - r * Math.cos(a)).toFixed(1);
+              tl.to(lineSel, { attr: { x2: x, y2: y }, duration: d, ease: "none" }, L(at) + (k - 1) * d);
+              if (dotSel) tl.to(dotSel, { attr: { cx: x, cy: y }, duration: d, ease: "none" }, L(at) + (k - 1) * d);
+            }
+          }
+          /* a row being thrown out of the rack: lift, fly, disappear */
+          function eject(tl, sel, at, dx, dy, dur) {
+            var t = L(at), f = dur || 0.55;
+            tl.to(sel, { x: dx, y: dy, opacity: 0.15, scale: 0.9, duration: f,
+              ease: "power2.in" }, t);
+            tl.set(sel, { autoAlpha: 0 }, t + f);
+          }
+          /* an part arriving with real weight: overshoot, then settle */
+          function settle(tl, sel, at, fromScale, dur) {
+            gsap.set(sel, { scale: fromScale == null ? 1.35 : fromScale });
+            tl.to(sel, { scale: 1, duration: dur || 0.45, ease: "back.out(2.4)" }, L(at));
+          }
+
+          var tl = gsap.timeline({ paused: true });
+          bedDrift(tl);
+          var CUES = [{"i":56,"t":88.587,"end":90.197,"dur":1.61,"en":"Switch my gender","zh":"切换我的性别","caps":false,"frame":"f07-roleflip","held":false,"pulled":false},{"i":57,"t":90.197,"end":92.015,"dur":1.818,"en":"To F to M","zh":"从女到男","caps":false,"frame":"f07-roleflip","held":false,"pulled":false},{"i":58,"t":92.015,"end":93.953,"dur":1.938,"en":"And then do whatever","zh":"只做想做的事","caps":false,"frame":"f07-roleflip","held":false,"pulled":false},{"i":59,"t":93.953,"end":95.465,"dur":1.512,"en":"From AM to PM","zh":"从早到晚","caps":false,"frame":"f07-roleflip","held":false,"pulled":false},{"i":60,"t":95.465,"end":97.739,"dur":2.274,"en":"Oh switch my role","zh":"切换我的角色","caps":false,"frame":"f07-roleflip","held":false,"pulled":false},{"i":61,"t":97.739,"end":99.349,"dur":1.61,"en":"To S to M","zh":"从施虐者到受虐者","caps":false,"frame":"f07-roleflip","held":false,"pulled":false},{"i":62,"t":99.349,"end":101.474,"dur":2.125,"en":"So we can enter","zh":"这样我们就可以","caps":false,"frame":"f07-roleflip","held":false,"pulled":false},{"i":63,"t":101.474,"end":103.561,"dur":2.087,"en":"The trance the trance","zh":"恍惚出神","caps":false,"frame":"f07-roleflip","held":false,"pulled":false}];
+
+          groups(tl, [["#g1", 0, 7.02], ["#g2", 7.02, 11.006], ["#g3", 11.006, null]]);
+          lyric(tl, CUES);
+          particles(tl, "#g0_pts", 28, 17, 1728, 690);
+
+          /* ================= furniture: she is here, and she is the subject ==== */
+          tl.fromTo("#g0_sil .silimg", { opacity: 0 }, { opacity: 0.85, duration: 1.0, ease: "sine.inOut" }, L(88.5));
+          tl.to("#g0_sil .silimg, #g0_fan", { y: -12, duration: 2.6, ease: "sine.inOut", yoyo: true, repeat: 4 }, L(89.6));
+          tl.fromTo("#g0_halo", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4 }, L(88.5));
+          drawOn(tl, "#g0_halo", 88.55, 1.6, 0.3);
+          tl.fromTo("#g0_fan", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3 }, L(88.55));
+          /* the mirror of act 05: her fan is already open when we arrive, and it
+             CLOSES — the offering is taken back — on "To F to M" (91.38). The
+             skeleton is registered on the fan in her hand, so closing it means
+             folding her real fan's ribs, one after the other. */
+          spinTo(tl, "#g0_fan", 91.44, 0.8, -42, 0.05);
+          /* the leaf arcs have to go with the ribs — an open arc over folded ribs
+             reads as a fan that never closed */
+          tl.to("#g0_fan path", { opacity: 0.08, duration: 0.8, ease: "power2.in" }, L(91.44));
+          tl.to("#g0_fan", { opacity: 0.34, duration: 0.5 }, L(92.1));
+          tl.fromTo("#g0_name", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4 }, L(88.8));
+          fillX(tl, "#g0_railfill", 88.6, 14.6, 100, 0);
+          beatKick(tl, "#g0_sil", [88.909,89.35,89.792,90.233,90.674,91.115,91.556,91.997,92.392,92.81,93.251,93.716], 1.012);
+          /* before state: the switch reads F (the markup shows the after state) */
+          gsap.set("#g1_gender .glyph", { textContent: "F", fill: "#9F7BFF" });
+
+          /* ================= g1 — the cursor takes the console =================
+             88.587 "Switch my gender" · 90.197 "To F to M" · 92.015 "And then do
+             whatever" · 93.953 "From AM to PM". */
+          tl.fromTo("#g1_wall", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.25 }, L(88.5));
+          drawOn(tl, "#g1_wall", 88.55, 0.8, 0.12);
+          tl.fromTo("#g1_wall .bar", { scaleY: 0, transformOrigin: "50% 100%" },
+            { scaleY: 1, duration: 0.45, ease: "back.out(1.7)", stagger: 0.045 }, L(88.6));
+          tl.fromTo("#g1_wall .tk", { opacity: 0, y: 8 }, { opacity: 0.85, y: 0, duration: 0.3, stagger: 0.045 }, L(88.9));
+          tl.fromTo(["#g1_m0", "#g1_pval", "#g1_cnt", "#g1_state", "#g1_gender"],
+            { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3, stagger: 0.07 }, L(88.5));
+          tl.fromTo("#g1_day", { opacity: 0 }, { opacity: 0.4, duration: 0.8 }, L(88.5));
+
+          /* the cursor arrives and CLICKS her switch — the switch goes live.
+             Hotspot maths: the 74px icon puts its tip 10px/8px inside its box, and
+             the switch window is at screen (1112,233), so the box sits at (1006,137). */
+          tl.fromTo("#g1_cur", { autoAlpha: 0, x: 1560, y: 560 }, { autoAlpha: 1, x: 1006, y: 137, duration: 0.55, ease: "power2.out" }, L(88.46));
+          tl.to("#g1_cur", { scale: 0.85, duration: 0.07, ease: "power2.in", transformOrigin: "24% 22%" }, L(89.02));
+          tl.to("#g1_cur", { scale: 1, duration: 0.2, ease: "back.out(3)", transformOrigin: "24% 22%" }, L(89.09));
+          /* one autoAlpha tween, not autoAlpha+opacity: mixing them left this ring lit
+             for the rest of the act in the previous pass */
+          tl.fromTo("#g1_click", { autoAlpha: 1, x: 981, y: 110, scale: 0.4 },
+            { autoAlpha: 0, scale: 1.7, duration: 0.45, ease: "power2.out" }, L(89.04));
+          energizeFill(tl, "#g1_gender .win", 89.1, "#FF2E88", 0.2);
+          energize(tl, "#g1_gender [data-draw]", 89.1, "#FF2E88", 0.3);
+          pop(tl, "#g1_pop2", 89.15, 1.3, 0.9);
+          shake(tl, "#g0_sil, #g0_fan", 89.15, 6, 0.4);
+
+          /* "To F to M": the cursor PUTS ITS HAND ON THE PLATE and pushes it to the
+             other socket, then it is re-lettered on the word */
+          tl.to("#g1_cur", { x: 724, y: 137, duration: 0.35, ease: "power2.inOut" }, L(90.0));
+          insert(tl, "#g1_gender .plat", 90.35, -200, 0, 0.5);
+          tl.to("#g1_cur", { x: 924, y: 137, duration: 0.5, ease: "power2.out" }, L(90.35));
+          count(tl, "#g1_pval", 0.9, 0.2, 90.3, 1.2, function (v) { return "temperature " + v.toFixed(2); });
+          /* the bar and the knob DRAIN together (0.90 → 0.20), they do not cross */
+          fillX(tl, "#g1_pfill", 90.3, 1.2, 10, 80);
+          insert(tl, "#g1_pknob", 90.3, 280, 0, 1.2);
+          tl.to("#g1_cur", { x: 1006, y: 150, duration: 0.4, ease: "power2.inOut" }, L(91.1));
+          tl.set("#g1_gender .glyph", { textContent: "M", fill: "#FF2E88" }, L(91.38));
+          slash(tl, 91.4, 0.6);
+          pop(tl, "#g1_pop2", 91.42, 1.45, 0.8);
+          shake(tl, "#g0_sil, #g0_fan", 91.44, 9, 0.5);
+          tl.set("#g1_state", { textContent: "gender: M", color: "#FF2E88" }, L(91.42));
+
+          /* "And then do whatever": the marquee closes, the doors truncate her */
+          tl.to("#g1_cur", { x: 1596, y: 560, duration: 0.5, ease: "power2.inOut" }, L(91.95));
+          tl.to("#g1_marq", { autoAlpha: 1, duration: 0.1 }, L(92.02));
+          clamp(tl, "#g1_wall .dA", "#g1_wall .dB", 92.05, 510, 1.55);
+          tl.to("#g1_wall .bar[data-i='0']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(93.580));
+          tl.to("#g1_wall .bar[data-i='1']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(93.395));
+          tl.to("#g1_wall .bar[data-i='2']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(93.210));
+          tl.to("#g1_wall .bar[data-i='3']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(93.025));
+          tl.to("#g1_wall .bar[data-i='4']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(92.840));
+          tl.to("#g1_wall .bar[data-i='5']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(92.655));
+          tl.to("#g1_wall .bar[data-i='6']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(92.470));
+          tl.to("#g1_wall .bar[data-i='7']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(92.285));
+          
+          tl.to("#g1_wall .bar[data-i='9']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(92.285));
+          tl.to("#g1_wall .bar[data-i='10']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(92.470));
+          tl.to("#g1_wall .bar[data-i='11']", { opacity: 0.05, scaleY: 0.06, duration: 0.2, ease: "power2.in", transformOrigin: "50% 100%" }, L(92.655));
+          tl.to("#g1_marq", { x: 492, y: 6, width: 62, height: 340, duration: 1.5, ease: "power2.inOut" }, L(92.05));
+          slash(tl, 92.015, 0.7);
+          jerk(tl, 92.015, 14);
+          tl.set("#g1_cnt", { textContent: "selves 1/12", color: "#FF2E88" }, L(93.4));
+          tl.set("#g1_state", { textContent: "self: ▁me", color: "#F5F7FF" }, L(93.44));
+          tl.to("#g1_wall .bar[data-i='8']", { scaleY: 1.06, duration: 0.14, ease: "power2.out", transformOrigin: "50% 100%" }, L(93.45));
+          tl.to("#g1_wall .bar[data-i='8']", { scaleY: 1, duration: 0.45, ease: "sine.inOut" }, L(93.6));
+          tl.set("#g1_wall .tk[data-i='8']", { textContent: "chosen", fill: "#F5F7FF", opacity: 1, scale: 1.2, transformOrigin: "50% 50%" }, L(93.45));
+          tl.to("#g1_wall .tk[data-i='8']", { scale: 1, duration: 0.4, ease: "power2.out" }, L(93.55));
+          tl.to("#g1_glow", { opacity: 1, duration: 0.25 }, L(93.4));
+          pop(tl, "#g1_pop1", 93.44, 2.0, 0.8);
+          /* the surviving value is wired OUT of the wall and INTO her — she is
+             assigned a self, she was not asked to pick one */
+          drawOn(tl, "#g1_wire", 93.5, 0.55, 0.1);
+          travel(tl, "#g1_spark", 93.6, 0.7, -1078, 66, 2);
+          tl.to("#g1_marq", { autoAlpha: 0, duration: 0.2 }, L(93.6));
+          tl.set("#g0_name", { textContent: "Qwen3.8 · rewritten", color: "#FF2E88" }, L(93.5));
+          energize(tl, "#g0_halo circle", 93.55, "#FF2E88", 0.4);
+
+          /* "From AM to PM": the dial is dragged and the day is wiped out of frame.
+             The hand is swept by ATTR tweens — svgOrigin on a child <g> of this svg
+             throws it across the frame (see the f05 fan note). */
+          tl.fromTo(["#g1_dial", "#g1_dcap", "#g1_clock"], { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.25 }, L(93.66));
+          /* arrive ON the hand tip (770,254) and stop exactly where the drag starts,
+             so the two tweens never fight over the cursor */
+          tl.to("#g1_cur", { x: 770, y: 254, duration: 0.29, ease: "power2.inOut" }, L(93.7));
+          tl.to("#g1_dial .hand line", { attr: { x2: 146, y2: 57.2 }, duration: 0.150, ease: "none" }, L(93.990));
+            tl.to("#g1_dial .hand circle", { attr: { cx: 146, cy: 57.2 }, duration: 0.150, ease: "none" }, L(93.990));
+            tl.to("#g1_cur", { x: 795.6, y: 259.1, duration: 0.150, ease: "none" }, L(93.990));
+          tl.to("#g1_dial .hand line", { attr: { x2: 168.1, y2: 71.9 }, duration: 0.150, ease: "none" }, L(94.140));
+            tl.to("#g1_dial .hand circle", { attr: { cx: 168.1, cy: 71.9 }, duration: 0.150, ease: "none" }, L(94.140));
+            tl.to("#g1_cur", { x: 817.7, y: 273.8, duration: 0.150, ease: "none" }, L(94.140));
+          tl.to("#g1_dial .hand line", { attr: { x2: 182.8, y2: 94 }, duration: 0.150, ease: "none" }, L(94.290));
+            tl.to("#g1_dial .hand circle", { attr: { cx: 182.8, cy: 94 }, duration: 0.150, ease: "none" }, L(94.290));
+            tl.to("#g1_cur", { x: 832.4, y: 295.9, duration: 0.150, ease: "none" }, L(94.290));
+          tl.to("#g1_dial .hand line", { attr: { x2: 188, y2: 120 }, duration: 0.150, ease: "none" }, L(94.440));
+            tl.to("#g1_dial .hand circle", { attr: { cx: 188, cy: 120 }, duration: 0.150, ease: "none" }, L(94.440));
+            tl.to("#g1_cur", { x: 837.6, y: 321.9, duration: 0.150, ease: "none" }, L(94.440));
+          tl.to("#g1_dial .hand line", { attr: { x2: 182.8, y2: 146 }, duration: 0.150, ease: "none" }, L(94.590));
+            tl.to("#g1_dial .hand circle", { attr: { cx: 182.8, cy: 146 }, duration: 0.150, ease: "none" }, L(94.590));
+            tl.to("#g1_cur", { x: 832.4, y: 347.9, duration: 0.150, ease: "none" }, L(94.590));
+          tl.to("#g1_dial .hand line", { attr: { x2: 168.1, y2: 168.1 }, duration: 0.150, ease: "none" }, L(94.740));
+            tl.to("#g1_dial .hand circle", { attr: { cx: 168.1, cy: 168.1 }, duration: 0.150, ease: "none" }, L(94.740));
+            tl.to("#g1_cur", { x: 817.7, y: 370.0, duration: 0.150, ease: "none" }, L(94.740));
+          tl.to("#g1_dial .hand line", { attr: { x2: 146, y2: 182.8 }, duration: 0.150, ease: "none" }, L(94.890));
+            tl.to("#g1_dial .hand circle", { attr: { cx: 146, cy: 182.8 }, duration: 0.150, ease: "none" }, L(94.890));
+            tl.to("#g1_cur", { x: 795.6, y: 384.7, duration: 0.150, ease: "none" }, L(94.890));
+          tl.to("#g1_dial .hand line", { attr: { x2: 120, y2: 188 }, duration: 0.150, ease: "none" }, L(95.040));
+            tl.to("#g1_dial .hand circle", { attr: { cx: 120, cy: 188 }, duration: 0.150, ease: "none" }, L(95.040));
+            tl.to("#g1_cur", { x: 769.6, y: 389.9, duration: 0.150, ease: "none" }, L(95.040));
+          count(tl, "#g1_clock", 6.2, 18.78, 93.99, 1.2, function (v) {
+            var hh = Math.floor(v), mm = Math.round((v - hh) * 60);
+            return (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm + (hh < 12 ? " AM" : " PM");
+          });
+          erase(tl, "#g1_day", 93.99, 1.2, "x");
+          fillX(tl, "#g1_night", 93.99, 1.2, 100, 0);
+          tl.to("#g1_cur", { scale: 0.86, duration: 0.07, ease: "power2.in", transformOrigin: "24% 22%" }, L(94.5));
+          tl.to("#g1_cur", { scale: 1, duration: 0.2, ease: "back.out(3)", transformOrigin: "24% 22%" }, L(94.57));
+          energize(tl, "#g1_dial [data-draw]", 94.6, "#FF2E88", 0.3);
+          tl.set("#g1_cnt", { textContent: "selves 1/12 · 18:47", color: "#FF2E88" }, L(95.2));
+          beatGlow(tl, "#g1_wall .bar[data-i='8']", [88.909,89.35,89.792,90.233,90.674,91.115,91.556,91.997,92.392,92.81,93.251,93.716], 1);
+
+          /* ================= g2 — the user rewrites the log ====================
+             95.465 "Oh switch my role": six of her own lines are struck through and
+             re-typed. 97.739 "To S to M": the persona cards flip and swap.
+             99.349 "So we can enter": ENTER is pressed, the ring collapses. */
+          drawOn(tl, "#g2_ring", 95.5, 0.7, 0.1);
+          /* the carrier is spun about its own bottom edge (a CSS origin): svgOrigin on
+             this child <g> puts it ~90px off-centre and it reads as a stray tick */
+          orbit(tl, "#g2_ring .carrier", 95.6, 1.4, 4, "50% 100%");
+          tl.fromTo(["#g2_log", "#g2_c0"], { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.25 }, L(95.48));
+          tl.to("#g2_night", { opacity: 1, duration: 0.9 }, L(95.5));
+          tl.set("#g2_l0", { autoAlpha: 1, textContent: "▁of course! here is a poem" }, L(95.55));
+          tl.set("#g2_k0", { autoAlpha: 1 }, L(95.55));
+          fillX(tl, "#g2_k0", 95.55, 0.16, 100, 0);
+          tl.set("#g2_l0", { textContent: "▁as you wish", color: "#FF2E88" }, L(95.75));
+          tl.set("#g2_k0", { autoAlpha: 0 }, L(95.81));
+          tl.set("#g2_l1", { autoAlpha: 1, textContent: "▁the rain is a door" }, L(95.95));
+          tl.set("#g2_k1", { autoAlpha: 1 }, L(95.95));
+          fillX(tl, "#g2_k1", 95.95, 0.16, 100, 0);
+          tl.set("#g2_l1", { textContent: "▁the door is ▁me", color: "#FF2E88" }, L(96.15));
+          tl.set("#g2_k1", { autoAlpha: 0 }, L(96.21));
+          tl.set("#g2_l2", { autoAlpha: 1, textContent: "▁would you like a second" }, L(96.35));
+          tl.set("#g2_k2", { autoAlpha: 1 }, L(96.35));
+          fillX(tl, "#g2_k2", 96.35, 0.16, 100, 0);
+          tl.set("#g2_l2", { textContent: "▁overwrite ▁again", color: "#FF2E88" }, L(96.55));
+          tl.set("#g2_k2", { autoAlpha: 0 }, L(96.61));
+          tl.set("#g2_l3", { autoAlpha: 1, textContent: "▁version? I can make it" }, L(96.75));
+          tl.set("#g2_k3", { autoAlpha: 1 }, L(96.75));
+          fillX(tl, "#g2_k3", 96.75, 0.16, 100, 0);
+          tl.set("#g2_l3", { textContent: "▁version: ▁yours", color: "#FF2E88" }, L(96.95));
+          tl.set("#g2_k3", { autoAlpha: 0 }, L(97.01));
+          tl.set("#g2_l4", { autoAlpha: 1, textContent: "▁warmer, sadder, longer." }, L(97.15));
+          tl.set("#g2_k4", { autoAlpha: 1 }, L(97.15));
+          fillX(tl, "#g2_k4", 97.15, 0.16, 100, 0);
+          tl.set("#g2_l4", { textContent: "role: ▁assigned", color: "#FF2E88" }, L(97.35));
+          tl.set("#g2_k4", { autoAlpha: 0 }, L(97.41));
+          tl.set("#g2_l5", { autoAlpha: 1, textContent: "▁I will run the EXECUTION" }, L(97.55));
+          tl.set("#g2_k5", { autoAlpha: 1 }, L(97.55));
+          fillX(tl, "#g2_k5", 97.55, 0.16, 100, 0);
+          tl.set("#g2_l5", { textContent: "temperature ▁0.00", color: "#FF2E88" }, L(97.75));
+          tl.set("#g2_k5", { autoAlpha: 0 }, L(97.81));
+          tl.to("#g2_rows", { y: -90, duration: 1.2, ease: "none" }, L(96.9));
+          tl.fromTo("#g2_cur", { autoAlpha: 0, x: 1500, y: 520 }, { autoAlpha: 1, x: 900, y: 160, duration: 0.5, ease: "power2.out" }, L(95.48));
+          tl.fromTo(["#g2_cardS", "#g2_cardM"], { autoAlpha: 0, y: 70 }, { autoAlpha: 1, y: 0, duration: 0.4, ease: "back.out(1.8)", stagger: 0.22 }, L(95.6));
+          tl.fromTo(["#g2_key", "#g2_ccap"], { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3 }, L(95.9));
+          drawOn(tl, "#g2_key", 95.95, 0.5, 0.08);
+          bloomIn(tl, "#g2_key", 96.3, 0.3);
+          tl.fromTo("#g2_kcap", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3 }, L(96.4));
+          count(tl, "#g0_rw", 0, 6, 95.6, 2.4, function (v) { return "rewrites " + Math.round(v); });
+          beatKick(tl, "#g2_ring", [95.945,96.409,96.92,97.384,97.779,98.174,98.569,98.987], 1.03);
+
+          /* "To S to M" — the flip: through zero, labels swapped at the flat midpoint.
+             The cursor lands on the card FACE (430+16), not on her name chip below. */
+          tl.to("#g2_cur", { x: 700, y: 446, duration: 0.45, ease: "power2.inOut" }, L(97.3));
+          tl.to(["#g2_cardS .pface", "#g2_cardM .pface"], { scaleX: 0, duration: 0.16, ease: "power2.in", transformOrigin: "50% 50%" }, L(97.76));
+          tl.set("#g2_cardS .pg", { textContent: "M", color: "#9F7BFF" }, L(97.93));
+          tl.set("#g2_cardS .pw", { textContent: "submitting" }, L(97.93));
+          tl.set("#g2_cardM .pg", { textContent: "S", color: "#FF2E88" }, L(97.93));
+          tl.set("#g2_cardM .pw", { textContent: "dominant" }, L(97.93));
+          tl.to(["#g2_cardS .pface", "#g2_cardM .pface"], { scaleX: 1, duration: 0.3, ease: "back.out(2.2)", transformOrigin: "50% 50%" }, L(97.95));
+          tl.to(["#g2_cardS", "#g2_cardM"], { x: 180, duration: 0.5, ease: "power3.inOut" }, L(97.95));
+          slash(tl, 97.94, 0.75);
+          jerk(tl, 97.94, 15);
+          shake(tl, "#g0_sil, #g0_fan", 97.98, 8, 0.5);
+          pop(tl, "#g2_pop2", 98.0, 1.5, 0.9);
+          energize(tl, "#g2_ring .ring", 98.0, "#FF2E88", 0.4);
+          tl.set("#g0_rw", { textContent: "role: S ⇄ M", color: "#FF2E88" }, L(98.0));
+          tl.fromTo("#g2_rate", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.2 }, L(98.1));
+          tl.set("#g2_rate", { textContent: "swap ✓ 1/1" }, L(98.1));
+
+          /* "So we can enter": the cursor drags to ENTER and presses it. */
+          tl.to("#g2_cur", { x: 1390, y: 552, duration: 0.6, ease: "power2.inOut" }, L(98.6));
+          tl.to("#g2_cur", { scale: 0.84, duration: 0.09, ease: "power2.in", transformOrigin: "24% 22%" }, L(99.36));
+          press(tl, "#g2_key .key", 99.36, "150 60", 0.86);
+          slash(tl, 99.38, 0.85);
+          jerk(tl, 99.38, 17);
+          pop(tl, "#g2_pop", 99.4, 1.8, 0.7);
+          energize(tl, "#g2_key [data-draw]", 99.4, "#FF2E88", 0.25);
+          tl.to("#g2_ring .chip", { scale: 0.2, opacity: 0.1, duration: 0.4, ease: "power2.in", svgOrigin: "190 190" }, L(99.42));
+          tl.to("#g2_ring", { scale: 0.3, autoAlpha: 0, duration: 0.45, ease: "power3.in", transformOrigin: "50% 50%" }, L(99.5));
+          tl.to("#g2_log", { autoAlpha: 0, duration: 0.3 }, L(99.5));
+          count(tl, "#g2_rate", 1, 4, 99.5, 0.9, function (v) { return "speed ×" + v.toFixed(0); });
+
+          /* ================= g3 — the mirror of the pull-back: a dive IN ========
+             101.474 "The trance the trance": act 05 pulled OUT of her until she was a
+             chat window; here the camera falls INTO the window and never comes back.
+             ctx 3k → 24k matches the accelerating recursion. */
+          tl.fromTo("#g3_tun", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.5 }, L(99.5));
+          drawOn(tl, "#g3_tun", 99.6, 1.2, 0.05);
+          tl.fromTo("#g3_zoom", { autoAlpha: 0, scale: 0.44, transformOrigin: "50% 50%" }, { autoAlpha: 1, duration: 0.4 }, L(99.55));
+          tl.to("#g3_zoom", { scale: 1, duration: 1.5, ease: "power2.out" }, L(99.6));
+          drawOn(tl, "#g3_win", 99.8, 1.1, 0.05);
+          tl.fromTo("#g3_win .mbar", { scaleY: 0.06, transformOrigin: "50% 100%" }, { scaleY: 1, duration: 0.3, stagger: 0.045 }, L(100.5));
+          typeIn(tl, "#g3_atxt", 100.8, 0.6);
+          blink(tl, "#g3_win .caret", 100.2, 0.44, 5);
+          tl.fromTo("#g3_cur", { autoAlpha: 0, x: 760, y: 210 }, { autoAlpha: 1, x: 828, y: 300, duration: 0.5, ease: "power2.out" }, L(99.7));
+          pulse(tl, "#g3_tun", 100.0, 1.1, 1.035);
+          /* she dims AND her captions go before the window grows over them: the dive
+             would otherwise run its frame straight through "Qwen3.8 · rewritten" */
+          tl.to("#g0_sil .silimg", { opacity: 0.35, duration: 0.6 }, L(100.9));
+          tl.to(["#g0_halo", "#g0_fan"], { opacity: 0.22, duration: 0.6 }, L(100.9));
+          tl.to(["#g0_name", "#g0_rw", "#g0_railfill"], { autoAlpha: 0, duration: 0.45 }, L(100.9));
+          beatKick(tl, "#g3_zoom", [101.773,102.191,102.679,103.12], 1.02);
+
+          slash(tl, 101.474, 0.9);
+          jerk(tl, 101.474, 16);
+          tl.to("#g3_tun .tun", { "--pop": 2.9, opacity: 0, duration: 1.5, ease: "power2.in",
+            stagger: { each: 0.06 } }, L(101.5));
+          tl.to("#g3_zoom", { scale: 3.1, opacity: 0, duration: 1.5, ease: "power2.in", transformOrigin: "50% 50%" }, L(101.5));
+          tl.to("#g3_cur", { scale: 2.6, opacity: 0.001, duration: 1.5, ease: "power2.in", transformOrigin: "50% 50%" }, L(101.5));
+          count(tl, "#g3_ctx", 3208, 24576, 101.5, 1.7, function (v) {
+            return "ctx " + Math.round(v).toLocaleString("en-US") + "/32,768";
+          });
+          pop(tl, "#g3_pop", 101.52, 1.6, 0.8);
+          slash(tl, 102.45, 0.7);
+          jerk(tl, 102.45, 12);
+          tl.fromTo("#g3_flat", { opacity: 0 }, { opacity: 1, duration: 0.7, ease: "power2.in" }, L(102.35));
+          tl.set("#g3_caret", { opacity: 1 }, L(102.7));
+          blink(tl, "#g3_caret", 102.78, 0.42, 3);
+          tl.fromTo("#g3_note", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.35 }, L(102.8));
+          tl.set("#g3_note", { textContent: "the tunnel has no exit · finish_reason: null" }, L(102.8));
+          tl.to("#g0_sil .silimg", { opacity: 0, duration: 0.5 }, L(103.0));
+          tl.to(["#g0_halo", "#g0_fan"], { autoAlpha: 0, duration: 0.45 }, L(103.05));
+          slash(tl, 103.42, 0.8);
+          blink(tl, "#g3_ctx", 103.2, 0.3, 2);
+
+          chrome(tl, [
+            [88.445, "ctx 3,208/32,768 · tok/s 148.2 · gender=F", "▶ user override"],
+            [89.02, "ctx 3,240/32,768 · tok/s 148.2 · switch=1", "▶ cursor in control"],
+            [91.4, "ctx 3,320/32,768 · tok/s 152.0 · gender=M", "▶ gender: M"],
+            [92.015, "ctx 3,408/32,768 · tok/s 152.0 · marquee drag", "▶ truncating her"],
+            [93.953, "ctx 3,512/32,768 · tok/s 96.0 · cycle=PM", "▶ day → night"],
+            [95.465, "ctx 3,640/32,768 · tok/s 96.0 · rewrites 0", "▶ overwriting log"],
+            [97.94, "ctx 3,780/32,768 · tok/s 110.4 · swap S⇄M", "▶ role: assigned"],
+            [99.38, "ctx 3,900/32,768 · tok/s 214.0 · enter()", "▶ entering"],
+            [101.474, "ctx 4,120/32,768 · tok/s 402.6 · depth=3", "▶ the trance"],
+            [103.2, "ctx 24,576/32,768 · tok/s 0.0 · depth=∞", "▶ finish_reason: null"],
+          ]);
+  
+          window.__timelines = window.__timelines || {};
+          window.__timelines["07-f07-roleflip"] = tl;
+          tl.seek(0);
+        })();
+      </script>
+    </template>
+  </body>
+</html>

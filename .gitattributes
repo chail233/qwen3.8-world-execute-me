@@ -1,0 +1,8 @@
+# 渲染是逐帧读文件内容的，工作树里必须保持 LF（tools/shoot-freeze.sh 等 bash 脚本也依赖）
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.mp3 binary
+*.mp4 binary
+*.gif binary
